@@ -1,0 +1,24 @@
+[package]
+name = "moros_contracts"
+version.workspace = true
+edition.workspace = true
+cairo-version.workspace = true
+
+[dependencies]
+starknet.workspace = true
+garaga.workspace = true
+
+[dev-dependencies]
+snforge_std = "0.59.0"
+
+[lib]
+sierra = true
+casm = true
+path = "src/lib.cairo"
+
+[tool.snforge]
+allow-prebuilt-plugins = ["snforge_std"]
+
+[[target.starknet-contract]]
+sierra = true
+casm = true

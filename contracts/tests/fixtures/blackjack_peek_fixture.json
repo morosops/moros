@@ -1,0 +1,92 @@
+{
+  "hand_id": 1,
+  "table_id": 2,
+  "wager": "10000000000000000000",
+  "transcript_root": "0x287dcca72d0d67c4b482a1f6fb2d6ecf3ff3c820a102097d8bf3ff29a3ebfb10",
+  "hand_id_hash": "0x2b977049c4c6197e4f21bf81de1a3dc768a8a7a0c0dc2da720044f67e4723e3d",
+  "dealer_upcard": 1,
+  "player_first_card": 10,
+  "player_second_card": 9,
+  "hole_card_index": 3,
+  "upcard_class": 1,
+  "peek_result": 0,
+  "dealer_hole_card_id": 47,
+  "dealer_hole_salt": "0x1b5c",
+  "dealer_hole_siblings": [
+    "0x16eca1dbaf6e8b8cfc9aba0f21ff0ed5358756ebc1926c0e57779b326405a169",
+    "0xd2c05d529e979b7f791021ebf8a659b2ee3edb13fb26ed10e1390b8d91f89fe",
+    "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+    "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+    "0x7f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+    "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+    "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+    "0x78295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+    "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61"
+  ],
+  "card_proofs": {
+    "player_first": {
+      "deck_index": 0,
+      "card_id": 9,
+      "salt": "0x1b59",
+      "siblings": [
+        "0x271b74285a4c200d30b891a54c2feedd623dd4add26e9881c4e1c7710010e0b",
+        "0xcebac991541264b13c9a3f998fd46eedbd425fa9072cd9429b09c798ebd8aa1",
+        "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+        "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+        "0x7f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+        "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+        "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+        "0x78295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+        "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61"
+      ]
+    },
+    "dealer_upcard": {
+      "deck_index": 1,
+      "card_id": 13,
+      "salt": "0x1b5a",
+      "siblings": [
+        "0x288d770b59fccce0e4d721f76c3f61eb5dcb60ca0714c3eaf834208c565ce15d",
+        "0xcebac991541264b13c9a3f998fd46eedbd425fa9072cd9429b09c798ebd8aa1",
+        "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+        "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+        "0x7f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+        "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+        "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+        "0x78295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+        "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61"
+      ]
+    },
+    "player_second": {
+      "deck_index": 2,
+      "card_id": 34,
+      "salt": "0x1b5b",
+      "siblings": [
+        "0xc8cf5d04aca283a017d3394839b9c28105119dbefe9d1ee8a7fcd3e8c3a61c6",
+        "0xd2c05d529e979b7f791021ebf8a659b2ee3edb13fb26ed10e1390b8d91f89fe",
+        "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+        "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+        "0x7f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+        "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+        "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+        "0x78295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+        "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61"
+      ]
+    },
+    "dealer_hole": {
+      "deck_index": 3,
+      "card_id": 47,
+      "salt": "0x1b5c",
+      "siblings": [
+        "0x16eca1dbaf6e8b8cfc9aba0f21ff0ed5358756ebc1926c0e57779b326405a169",
+        "0xd2c05d529e979b7f791021ebf8a659b2ee3edb13fb26ed10e1390b8d91f89fe",
+        "0x1069673dcdb12263df301a6ff584a7ec261a44cb9dc68df067a4774460b1f1e1",
+        "0x18f43331537ee2af2e3d758d50f72106467c6eea50371dd528d57eb2b856d238",
+        "0x7f9d837cb17b0d36320ffe93ba52345f1b728571a568265caac97559dbc952a",
+        "0x2b94cf5e8746b3f5c9631f4c5df32907a699c58c94b2ad4d7b5cec1639183f55",
+        "0x2dee93c5a666459646ea7d22cca9e1bcfed71e6951b953611d11dda32ea09d78",
+        "0x78295e5a22b84e982cf601eb639597b8b0515a88cb5ac7fa8a4aabe3c87349d",
+        "0x2fa5e5f18f6027a6501bec864564472a616b2e274a41211a444cbe3a99f3cc61"
+      ]
+    }
+  }
+}
