@@ -1,43 +1,95 @@
 # Moros
 
-Moros is a Starknet casino protocol. This repository currently tracks the on-chain contract layer and the blackjack dealer-peek circuit source.
+Moros is a on-chain casino stack with on-chain game contracts, a React client, and backend services for gameplay orchestration, deposits, indexing, auth bridging, and verifier/prover support.
 
-## Contracts
+## Repository Layout
 
-The Cairo workspace is rooted at `Scarb.toml` and the contract package is in `contracts/`.
+- `contracts/`: Cairo contracts and tests.
+- `circuits/`: blackjack dealer-peek Circom source.
+- `services/`: Rust/Node backend services.
+- `app/`: React + Vite frontend.
+
+## On-Chain Contracts
+
+The Cairo workspace is rooted at `Scarb.toml`.
 
 Core contracts:
 
-- `BankrollVault`: STRK custody, player wallet/vault balances, house liquidity, exposure reservation, player withdrawals, and timelocked house withdrawals.
-- `RewardsTreasury`: isolated rewards funding with global and per-operator budget limits.
-- `SessionRegistry`: session-key authorization limits for gameplay actions.
-- `TableRegistry`: table ids, table addresses, and table wager bounds.
-- `DealerCommitment`: server-seed commitment registry used by dice, roulette, and baccarat.
-- `DeckCommitment`: Poseidon Merkle-root commitments and reveal tracking for blackjack decks.
-- `BlackjackTable`, `DiceTable`, `RouletteTable`, `BaccaratTable`: game-specific state machines, wager caps, timeout recovery, and payout settlement.
-- `Groth16VerifierBN254`: Garaga-generated verifier used by blackjack dealer-peek validation.
+- `BankrollVault`: STRK vault ledger for player wallet balance, player vault balance, reserved funds, house liquidity, and timelocked house withdrawals.
+- `RewardsTreasury`: separate rewards pool with global budget caps and per-operator spending limits.
+- `SessionRegistry`: session-key authorization and action limits for gameplay.
+- `TableRegistry`: canonical table ids, table contract addresses, wager caps, and table metadata.
+- `DealerCommitment`: server-seed commitment registry for dice, roulette, and baccarat.
+- `DeckCommitment`: Poseidon Merkle-root deck commitment and reveal bitmap tracking for blackjack.
+- `BlackjackTable`: Vegas-strip blackjack state machine with Groth16 dealer-peek verification.
+- `DiceTable`: commit / open / reveal / verify dice flow with bounded wagers.
+- `RouletteTable`: European roulette settlement and bet validation.
+- `BaccaratTable`: baccarat round settlement and wager validation.
+- `Groth16VerifierBN254`: Garaga-generated verifier consumed by blackjack dealer-peek validation.
 
-The committed tests under `contracts/tests/` cover balance segregation, reward treasury limits, game caps, timeout paths, session authorization, blackjack commitment binding, and roulette/dice/baccarat settlement constraints.
+Supporting Cairo modules:
 
-## Circuit
+- `blackjack_logic.cairo`
+- `interfaces.cairo`
+- `types.cairo`
 
-`circuits/blackjack/dealer_peek_no_blackjack.circom` is the blackjack dealer-peek circuit. It proves that the dealer hole card opening is bound to the committed deck root and that the public peek result matches the blackjack predicate for Ace or ten-value upcards.
+Contract tests under `contracts/tests/` cover vault segregation, reward limits, table caps, blackjack deck binding, timeout paths, and dice / roulette / baccarat settlement rules.
 
-Generated circuit artifacts are intentionally not committed. Build outputs belong under `circuits/build/`, which is ignored.
+## Blackjack Circuit
 
-## Verification
+`circuits/blackjack/dealer_peek_no_blackjack.circom` proves the dealer peek predicate for Ace / ten-value upcards against the committed deck leaf used by blackjack.
 
-Run contract tests:
+Generated proving artifacts are intentionally not committed. Build outputs belong under `circuits/build/`, which is ignored.
+
+## Backend Services
+
+Rust services:
+
+- `services/game-coordinator`: main gameplay API, profile and funding coordination, rewards, and contract reads/writes.
+- `services/relayer`: relayed gameplay action submission for active hand runtimes.
+- `services/indexer`: on-chain event indexing into the read model.
+- `services/deposit-router`: deposit address issuance, deposit tracking, and routing state.
+- `services/common`: shared persistence, models, migrations, and contract client helpers.
+- `services/blackjack-prover`: blackjack proving helpers.
+- `services/blackjack-verifier`: verifier-side validation service support.
+
+Node services:
+
+- `services/privy-bridge`: Privy auth bridge, embedded Starknet wallet coordination, paymaster bridge, and Moros account resolution.
+- `services/deposit-executor`: executes routed deposit jobs.
+
+Database migrations live in `services/common/migrations/`.
+
+## Frontend
+
+`app/` is a React 19 + Vite application using:
+
+- `@privy-io/react-auth` for Google / email / wallet login
+- `starkzap` for Starknet wallet and paymaster integration
+- `zustand` for client state
+- `@tanstack/react-query` for server state
+
+The frontend consumes the coordinator, relayer, auth bridge, and deposit-router APIs and renders the game flows for dice, blackjack, roulette, baccarat, wallet, rewards, leaderboard, and profile UX.
+
+## Local Verification
+
+Contracts:
 
 ```bash
 cd contracts
 snforge test
 ```
 
-Expected local result:
+Services:
 
-```text
-74 passed, 0 failed, 2 ignored
+```bash
+cargo check --workspace
 ```
 
-The ignored tests are live fork checks for the real Groth16 verifier fixture and require an external Starknet RPC. They are not part of the default deterministic local test run.
+Frontend:
+
+```bash
+npm --prefix app run test
+npm --prefix app run build
+```
+

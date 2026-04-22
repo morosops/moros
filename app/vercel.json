@@ -1,0 +1,32 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/coordinator/:match*",
+      "destination": "https://api.moros.bet/coordinator/:match*"
+    },
+    {
+      "source": "/relayer/:match*",
+      "destination": "https://api.moros.bet/relayer/:match*"
+    },
+    {
+      "source": "/indexer/:match*",
+      "destination": "https://api.moros.bet/indexer/:match*"
+    },
+    {
+      "source": "/deposit/:match*",
+      "destination": "https://api.moros.bet/deposit/:match*"
+    },
+    {
+      "source": "/auth/:match*",
+      "destination": "https://api.moros.bet/auth/:match*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

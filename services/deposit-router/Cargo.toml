@@ -1,0 +1,25 @@
+[package]
+name = "moros-deposit-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+bs58.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+k256.workspace = true
+moros-common = { path = "../common" }
+num-bigint.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha3.workspace = true
+sqlx.workspace = true
+starknet.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+uuid.workspace = true

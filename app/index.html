@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Moros is a private-bankroll originals product on Starknet."
+    />
+    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png?v=4" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=3" />
+    <title>Moros</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.__morosBootstrapErrors = [];
+      window.addEventListener('error', function (event) {
+        window.__morosBootstrapErrors.push({
+          type: 'error',
+          message: event.message,
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+        });
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        window.__morosBootstrapErrors.push({
+          type: 'unhandledrejection',
+          message:
+            reason && typeof reason === 'object' && 'message' in reason
+              ? String(reason.message)
+              : String(reason),
+        });
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

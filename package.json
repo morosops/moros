@@ -1,0 +1,33 @@
+{
+  "name": "moros",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Private-bankroll originals on Starknet",
+  "workspaces": [
+    "app"
+  ],
+  "scripts": {
+    "build:contracts": "PATH=\"$HOME/.asdf/shims:$HOME/.local/bin:$PATH\" scarb build",
+    "test:contracts": "PATH=\"$HOME/.asdf/shims:$HOME/.local/bin:$PATH\" snforge test",
+    "build:services": "cargo build --workspace",
+    "check:services": "cargo check --workspace",
+    "test:services": "cargo test --workspace",
+    "build:app": "npm run build --workspace @moros/app && rm -rf dist && mkdir -p dist && cp -R app/dist/. dist/",
+    "test:app": "npm run test --workspace @moros/app",
+    "dev:app": "npm run dev --workspace @moros/app",
+    "check": "npm run build:contracts && npm run check:services",
+    "verify": "npm run test:contracts && npm run test:services && npm run test:app && npm run build:app"
+  },
+  "dependencies": {
+    "ethers": "^6.16.0",
+    "@hyperlane-xyz/registry": "^19.4.0",
+    "@hyperlane-xyz/sdk": "^14.4.0",
+    "@hyperlane-xyz/utils": "^14.4.0",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.5"
+  }
+}

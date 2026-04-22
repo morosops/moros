@@ -9,6 +9,7 @@ dist/
 .next/
 .turbo/
 app/.tmp/
+app/.vite/
 *.tsbuildinfo
 circuits/build/
 .deploy/
@@ -17,3 +18,5 @@ circuits/build/
 .env.*.local
 services/.env*
 app/.env*
+!services/.env.example
+!app/.env.example

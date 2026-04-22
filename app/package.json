@@ -1,0 +1,45 @@
+{
+  "name": "@moros/app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "build:app": "npm run build",
+    "preview": "vite preview",
+    "test": "mkdir -p .tmp && TMPDIR=$PWD/.tmp vitest run --maxWorkers 1 --pool forks"
+  },
+  "dependencies": {
+    "@fatsolutions/tongo-sdk": "^1.4.0",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@privy-io/react-auth": "^3.21.2",
+    "@starknet-io/get-starknet-core": "^4.0.8",
+    "@tanstack/react-query": "^5.90.5",
+    "clsx": "^2.1.1",
+    "qrcode": "^1.5.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.5",
+    "starknet": "^9.4.2",
+    "starkzap": "^2.0.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "jsdom": "^27.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.11",
+    "vitest": "^3.2.4"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "4.60.1"
+  }
+}

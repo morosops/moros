@@ -1,0 +1,18 @@
+{
+  "name": "privy-bridge",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@privy-io/node": "^0.14.0",
+    "starknet": "^9.4.2"
+  }
+}
