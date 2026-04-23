@@ -36,6 +36,10 @@ type StarkzapFinanceModule = typeof import('../lib/starkzap-finance')
 
 let starkzapModulePromise: Promise<StarkzapModule> | null = null
 let starkzapFinanceModulePromise: Promise<StarkzapFinanceModule> | null = null
+let privyConnectPromise:
+  | Promise<{ address: string; strategy: 'external' | 'privy'; walletLink?: unknown }>
+  | null = null
+let gameplaySessionPromise: Promise<string> | null = null
 
 async function loadStarkzap() {
   if (!starkzapModulePromise) {
@@ -192,6 +196,11 @@ export function useMorosWallet() {
 
   const connectPrivy = useCallback(
     async (idToken?: string | null, options: ConnectMorosWalletOptions = {}) => {
+      if (privyConnectPromise) {
+        return privyConnectPromise
+      }
+
+      const task = (async () => {
       const resolvedIdToken = idToken ?? await resolvePrivyIdentityToken()
       if (!resolvedIdToken) {
         const error = new Error('Login with Google or email before connecting the Moros wallet.')
@@ -233,6 +242,13 @@ export function useMorosWallet() {
         store.setError(normalizeWalletError(error, 'Wallet connection failed.'))
         throw error
       }
+      })()
+
+      privyConnectPromise = task.finally(() => {
+        privyConnectPromise = null
+      })
+
+      return privyConnectPromise
     },
     [
       auth.signStarknetHash,
@@ -410,29 +426,45 @@ export function useMorosWallet() {
     throw new Error('Signature request failed.')
   }, [accountRequiredMessage, reconnectForInteraction, store])
 
-  const ensureGameplaySession = useCallback(async () => {
+  const ensureGameplaySessionInternal = useCallback(async (
+    options?: { background?: boolean },
+  ) => {
+    const background = Boolean(options?.background)
     let currentState = await ensureCanonicalPrivyWallet()
-    if (!currentState.wallet || !currentState.address) {
+    const connectedWallet = currentState.wallet
+    const connectedAddress = currentState.address
+    if (!connectedWallet || !connectedAddress) {
       throw new Error(accountRequiredMessage)
     }
 
     const cachedSession = readStoredGameplaySession()
     const nowUnix = Math.floor(Date.now() / 1000)
     if (
-      gameplaySessionMatchesAddress(cachedSession, currentState.address)
+      gameplaySessionMatchesAddress(cachedSession, connectedAddress)
       && gameplaySessionMatchesKey(cachedSession, morosConfig.gameplaySessionKey)
       && cachedSession
       && cachedSession.expiresAtUnix > nowUnix + 30
     ) {
-      store.setReady()
+      if (!background) {
+        store.setReady()
+      }
       return cachedSession.sessionToken
     }
 
-    store.setPreparing('Preparing wallet...')
-    try {
+    if (gameplaySessionPromise) {
+      if (!background) {
+        store.setPreparing('Authorizing gameplay...')
+      }
+      return gameplaySessionPromise
+    }
+
+    const task = (async () => {
+      if (!background) {
+        store.setPreparing('Preparing wallet...')
+      }
       const { prepareMorosWalletForExecution, registerMorosGameplaySession } = await loadStarkzap()
-      let activeWallet = currentState.wallet
-      let activeAddress = currentState.address
+      let activeWallet = connectedWallet
+      let activeAddress = connectedAddress
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
           await prepareMorosWalletForExecution(activeWallet)
@@ -450,7 +482,9 @@ export function useMorosWallet() {
         }
       }
 
-      store.setPreparing('Authorizing gameplay...')
+      if (!background) {
+        store.setPreparing('Authorizing gameplay...')
+      }
       const challenge = await createGameplaySessionChallenge({
         wallet_address: activeAddress,
       })
@@ -460,10 +494,12 @@ export function useMorosWallet() {
         challenge_id: challenge.challenge_id,
         signature,
       })
-      store.setPreparing('Enabling gameplay session...')
       const sessionKeyAddress = morosConfig.gameplaySessionKey
       if (!sessionKeyAddress) {
         throw new Error('VITE_MOROS_GAMEPLAY_SESSION_KEY_ADDRESS is not configured.')
+      }
+      if (!background) {
+        store.setPreparing('Enabling gameplay session...')
       }
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
@@ -492,13 +528,36 @@ export function useMorosWallet() {
         expiresAtUnix: session.expires_at_unix,
         sessionKeyAddress,
       })
-      store.setReady()
+      if (!background) {
+        store.setReady()
+      }
       return session.session_token
-    } catch (error) {
-      store.setError(normalizeWalletError(error, 'Gameplay authorization failed.'))
-      throw error
-    }
+    })()
+      .catch((error) => {
+        if (!background) {
+          store.setError(normalizeWalletError(error, 'Gameplay authorization failed.'))
+        }
+        throw error
+      })
+      .finally(() => {
+        gameplaySessionPromise = null
+      })
+
+    gameplaySessionPromise = task
+    return task
   }, [accountRequiredMessage, ensureCanonicalPrivyWallet, signTypedData, store])
+
+  const ensureGameplaySession = useCallback(async () => {
+    return ensureGameplaySessionInternal()
+  }, [ensureGameplaySessionInternal])
+
+  const prewarmGameplaySession = useCallback(async () => {
+    try {
+      await ensureGameplaySessionInternal({ background: true })
+    } catch {
+      // Foreground gameplay actions will retry with user-visible errors when needed.
+    }
+  }, [ensureGameplaySessionInternal])
 
   const runWalletExecution = useCallback(async <T,>(
     execute: (wallet: NonNullable<typeof store.wallet>) => Promise<{ hash: string; explorerUrl?: string; wait: () => Promise<T> }>,
@@ -728,6 +787,7 @@ export function useMorosWallet() {
     openRouletteSpin,
     openBaccaratRound,
     ensureGameplaySession,
+    prewarmGameplaySession,
     signTypedData,
     listExternalWallets,
     warmConnect,

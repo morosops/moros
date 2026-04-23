@@ -18,6 +18,7 @@ import {
 import { formatStrk, formatWagerInput, parseStrkInputToWei } from '../lib/format'
 import { randomClientSeed, sameFelt } from '../lib/random'
 import { useMorosWallet } from '../hooks/useMorosWallet'
+import { useOriginalsCommitment } from '../hooks/useOriginalsCommitment'
 import { useTableState } from '../hooks/useTableState'
 import { useAccountStore } from '../store/account'
 import { useToastStore } from '../store/toast'
@@ -47,6 +48,7 @@ const rouletteSeparatorRingRadius = 117
 const roulettePocketRingOuterRadius = 112
 const roulettePocketRingInnerRadius = 76
 const rouletteBallTrackRadius = 182
+const TABLE_STATE_FRESH_MS = 5_000
 
 type BetDraft = {
   key: string
@@ -194,6 +196,22 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
+function playerOutcomeTone(payout?: string | null, wager?: string | null) {
+  if (!payout || !wager) {
+    return undefined
+  }
+
+  const payoutWei = BigInt(payout)
+  const wagerWei = BigInt(wager)
+  if (payoutWei > wagerWei) {
+    return 'win'
+  }
+  if (payoutWei === wagerWei) {
+    return 'push'
+  }
+  return 'loss'
+}
+
 function polarPoint(cx: number, cy: number, radius: number, angleDegrees: number) {
   const radians = (angleDegrees * Math.PI) / 180
   return {
@@ -240,7 +258,7 @@ function roulettePocketFill(value: number) {
 }
 
 export function RoulettePage() {
-  const { address, connect, ensureGameplaySession, error: walletError, openRouletteSpin, pendingLabel, status: walletStatus } = useMorosWallet()
+  const { address, connect, error: walletError, openRouletteSpin, pendingLabel, status: walletStatus } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -271,7 +289,10 @@ export function RoulettePage() {
   const [wheelRotation, setWheelRotation] = useState(0)
   const [ballAngle, setBallAngle] = useState(-90)
   const pushToast = useToastStore((state) => state.pushToast)
-  const { refreshTableState, tableState } = useTableState(rouletteTableId, resolvedWalletAddress)
+  const { lastLoadedAt, refreshTableState, tableState } = useTableState(rouletteTableId, resolvedWalletAddress)
+  const { commitmentReady, takeCommitment } = useOriginalsCommitment(createRouletteCommitment, {
+    enabled: accountState.signedIn,
+  })
 
   const selectedChip = chipOptions[selectedChipIndex]
   const selectedChipWei = useMemo(() => parseStrkInput(selectedChip.value), [selectedChip.value])
@@ -642,13 +663,21 @@ export function RoulettePage() {
       }
 
       startWheelMotion()
-      await ensureGameplaySession()
       playerAddress =
         useAccountStore.getState().walletAddress ??
         useWalletStore.getState().address ??
         playerAddress
-      const liveTable = await refreshTableState(playerAddress)
-      const commitment = await createRouletteCommitment()
+      const canReuseTableState =
+        Boolean(tableState)
+        && typeof lastLoadedAt === 'number'
+        && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
+        && Date.now() - lastLoadedAt <= TABLE_STATE_FRESH_MS
+      const [liveTable, commitment] = await Promise.all([
+        canReuseTableState
+          ? Promise.resolve({ live_players: undefined, state: tableState! })
+          : refreshTableState(playerAddress),
+        takeCommitment(),
+      ])
       setActiveCommitment(commitment.commitment.commitment_id)
       setTransientFairnessPhase('open')
       const clientSeed = clientSeedDraft ?? randomClientSeed()
@@ -659,7 +688,9 @@ export function RoulettePage() {
       setStatusMessage(
         bankrollShortfall > 0n
           ? 'Deposit STRK into your Moros balance before betting.'
-          : 'Roulette seed hash committed. Opening the spin...',
+          : commitmentReady
+            ? 'Opening the spin...'
+            : 'Roulette seed hash committed. Opening the spin...',
       )
       await openRouletteSpin({
         tableId: rouletteTableId,
@@ -725,6 +756,12 @@ export function RoulettePage() {
       readyLabel: 'Bet',
       walletBusy,
     })
+  const spinOutcome = spin ? playerOutcomeTone(spin.payout, spin.wager) : undefined
+
+  function rouletteBetOutcome(kind: number, selection: number) {
+    const settledBet = spin?.bets.find((bet) => bet.kind === kind && bet.selection === selection)
+    return settledBet ? playerOutcomeTone(settledBet.payout, settledBet.amount) : undefined
+  }
 
   const pageClassName = `page page--roulette${theatreMode ? ' page--theatre' : ''}`
 
@@ -801,7 +838,11 @@ export function RoulettePage() {
           <div className="roulette-main-surface">
             <div className="roulette-wheel-stage">
               {spin ? (
-                <div className={`roulette-wheel-result roulette-wheel-result--${pocketTone(spin.result_number)}`}>
+                <div className={cx(
+                  'roulette-wheel-result',
+                  `roulette-wheel-result--${pocketTone(spin.result_number)}`,
+                  spinOutcome && `roulette-wheel-result--player-${spinOutcome}`,
+                )}>
                   Result {spin.result_number}
                 </div>
               ) : null}
@@ -953,6 +994,8 @@ export function RoulettePage() {
                 className={cx(
                   'roulette-bet-cell roulette-bet-cell--zero',
                   betAmountFor(0, 0) && 'roulette-bet-cell--placed',
+                  rouletteBetOutcome(0, 0) === 'win' && 'roulette-bet-cell--player-win',
+                  rouletteBetOutcome(0, 0) === 'loss' && 'roulette-bet-cell--player-loss',
                   spin?.result_number === 0 && 'roulette-bet-cell--winning',
                 )}
                 onClick={() => addBet(0, 0, '0')}
@@ -971,6 +1014,8 @@ export function RoulettePage() {
                           pocketTone(number) === 'red' && 'roulette-bet-cell--red',
                           pocketTone(number) === 'black' && 'roulette-bet-cell--black',
                           betAmountFor(0, number) && 'roulette-bet-cell--placed',
+                          rouletteBetOutcome(0, number) === 'win' && 'roulette-bet-cell--player-win',
+                          rouletteBetOutcome(0, number) === 'loss' && 'roulette-bet-cell--player-loss',
                           spin?.result_number === number && 'roulette-bet-cell--winning',
                         )}
                         key={number}
@@ -994,6 +1039,8 @@ export function RoulettePage() {
                         className={cx(
                           'roulette-bet-cell roulette-bet-cell--outside roulette-bet-cell--column',
                           betAmountFor(8, selection) && 'roulette-bet-cell--placed',
+                          rouletteBetOutcome(8, selection) === 'win' && 'roulette-bet-cell--player-win',
+                          rouletteBetOutcome(8, selection) === 'loss' && 'roulette-bet-cell--player-loss',
                           winning && 'roulette-bet-cell--winning',
                         )}
                         key={`column-${selection}`}
@@ -1016,6 +1063,8 @@ export function RoulettePage() {
                       className={cx(
                         'roulette-bet-cell roulette-bet-cell--outside',
                         betAmountFor(entry.kind, entry.selection) && 'roulette-bet-cell--placed',
+                        rouletteBetOutcome(entry.kind, entry.selection) === 'win' && 'roulette-bet-cell--player-win',
+                        rouletteBetOutcome(entry.kind, entry.selection) === 'loss' && 'roulette-bet-cell--player-loss',
                         winning && 'roulette-bet-cell--winning',
                       )}
                       key={entry.key}
@@ -1039,6 +1088,8 @@ export function RoulettePage() {
                         entry.tone === 'red' && 'roulette-bet-cell--red',
                         entry.tone === 'black' && 'roulette-bet-cell--black',
                         betAmountFor(entry.kind, entry.selection) && 'roulette-bet-cell--placed',
+                        rouletteBetOutcome(entry.kind, entry.selection) === 'win' && 'roulette-bet-cell--player-win',
+                        rouletteBetOutcome(entry.kind, entry.selection) === 'loss' && 'roulette-bet-cell--player-loss',
                         winning && 'roulette-bet-cell--winning',
                       )}
                       key={entry.key}

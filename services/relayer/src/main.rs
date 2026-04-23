@@ -279,18 +279,6 @@ async fn relay_action(
             .finalize_hand(chain_hand_id)
             .await
             .map_err(ApiError::internal)?;
-    } else {
-        chain
-            .wait_for_hand_state(
-                chain_hand_id,
-                &next_snapshot.status,
-                &next_snapshot.phase,
-                next_snapshot.action_count,
-                next_snapshot.seat_count,
-                1,
-            )
-            .await
-            .map_err(ApiError::internal)?;
     }
 
     let chain_hand = chain

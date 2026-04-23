@@ -10,6 +10,7 @@ import { OriginalsFairnessStepper, type OriginalsFairnessStage } from '../compon
 import { deriveMorosAccountState, resolveMorosPrimaryActionLabel } from '../lib/account-state'
 import { BACCARAT_MAX_SHOE_DRAW_ATTEMPTS, morosGameBySlug } from '../lib/game-config'
 import { useMorosWallet } from '../hooks/useMorosWallet'
+import { useOriginalsCommitment } from '../hooks/useOriginalsCommitment'
 import { useTableState } from '../hooks/useTableState'
 import {
   MOROS_BACCARAT_CARD_DOMAIN,
@@ -33,6 +34,7 @@ const chipOptions = [
   { label: '100', value: '100' },
   { label: '1K', value: '1000' },
 ]
+const TABLE_STATE_FRESH_MS = 5_000
 
 const betZones = [
   { id: 0, label: 'Player', tone: 'player', priority: 'primary' },
@@ -236,6 +238,22 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
+function playerOutcomeTone(payout?: string | null, wager?: string | null) {
+  if (!payout || !wager) {
+    return undefined
+  }
+
+  const payoutWei = BigInt(payout)
+  const wagerWei = BigInt(wager)
+  if (payoutWei > wagerWei) {
+    return 'win'
+  }
+  if (payoutWei === wagerWei) {
+    return 'push'
+  }
+  return 'loss'
+}
+
 function playPickupSoundBurst(count: number) {
   if (typeof window === 'undefined' || count <= 0) {
     return
@@ -251,7 +269,7 @@ function playPickupSoundBurst(count: number) {
 }
 
 export function BaccaratPage() {
-  const { address, connect, ensureGameplaySession, error: walletError, openBaccaratRound, pendingLabel, status: walletStatus } = useMorosWallet()
+  const { address, connect, error: walletError, openBaccaratRound, pendingLabel, status: walletStatus } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -278,7 +296,10 @@ export function BaccaratPage() {
   const dealInFlightRef = useRef(false)
   const previousCardCountRef = useRef(0)
   const pushToast = useToastStore((state) => state.pushToast)
-  const { refreshTableState, tableState } = useTableState(baccaratTableId, resolvedWalletAddress)
+  const { lastLoadedAt, refreshTableState, tableState } = useTableState(baccaratTableId, resolvedWalletAddress)
+  const { commitmentReady, takeCommitment } = useOriginalsCommitment(createBaccaratCommitment, {
+    enabled: accountState.signedIn,
+  })
 
   const selectedChip = chipOptions[selectedChipIndex]
   const selectedChipWei = useMemo(() => parseStrkInput(selectedChip.value), [selectedChip.value])
@@ -411,15 +432,23 @@ export function BaccaratPage() {
         return
       }
 
-      await ensureGameplaySession()
       playerAddress =
         useAccountStore.getState().walletAddress ??
         useWalletStore.getState().address ??
         playerAddress
       const activeZone = activeBets[0]
       const wagerWei = (zoneBets[activeZone.id] ?? 0n).toString()
-      const liveTable = await refreshTableState(playerAddress)
-      const commitment = await createBaccaratCommitment()
+      const canReuseTableState =
+        Boolean(tableState)
+        && typeof lastLoadedAt === 'number'
+        && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
+        && Date.now() - lastLoadedAt <= TABLE_STATE_FRESH_MS
+      const [liveTable, commitment] = await Promise.all([
+        canReuseTableState
+          ? Promise.resolve({ live_players: undefined, state: tableState! })
+          : refreshTableState(playerAddress),
+        takeCommitment(),
+      ])
       setActiveCommitment(commitment.commitment.commitment_id)
       setTransientFairnessPhase('open')
       const clientSeed = clientSeedDraft ?? randomClientSeed()
@@ -429,7 +458,9 @@ export function BaccaratPage() {
       setStatusMessage(
         bankrollShortfall > 0n
           ? 'Deposit STRK into your Moros balance before betting.'
-          : 'Baccarat seed hash committed. Opening the deal...',
+          : commitmentReady
+            ? 'Opening the deal...'
+            : 'Baccarat seed hash committed. Opening the deal...',
       )
       await openBaccaratRound({
         tableId: baccaratTableId,
@@ -489,6 +520,7 @@ export function BaccaratPage() {
       readyLabel: 'Bet',
       walletBusy,
     })
+  const roundOutcome = round ? playerOutcomeTone(round.payout, round.wager) : undefined
   const baccaratProofPassed = proof
     ? proof.seedHashMatches
       && proof.playerCardsMatch
@@ -639,6 +671,7 @@ export function BaccaratPage() {
               {betZones.map((zone) => {
                 const amount = zoneBets[zone.id] ?? 0n
                 const isWinning = round?.winner === zone.id
+                const isPlayerBet = round?.bet_side === zone.id
                 return (
                   <button
                     className={cx(
@@ -649,6 +682,9 @@ export function BaccaratPage() {
                       zone.tone === 'banker' && 'baccarat-bet-zone--banker',
                       amount > 0n && 'baccarat-bet-zone--placed',
                       isWinning && 'baccarat-bet-zone--winning',
+                      isPlayerBet && roundOutcome === 'win' && 'baccarat-bet-zone--player-win',
+                      isPlayerBet && roundOutcome === 'loss' && 'baccarat-bet-zone--player-loss',
+                      isPlayerBet && roundOutcome === 'push' && 'baccarat-bet-zone--player-push',
                       selectedSide === zone.id && 'baccarat-bet-zone--selected',
                     )}
                     key={zone.id}

@@ -43,6 +43,7 @@ import {
 } from '../lib/dice-strategy'
 import { useMorosWallet } from '../hooks/useMorosWallet'
 import { clampChance, quotedDicePayout, useDiceGame } from '../hooks/useDiceGame'
+import { useOriginalsCommitment } from '../hooks/useOriginalsCommitment'
 import { useTableState } from '../hooks/useTableState'
 import { useAccountStore } from '../store/account'
 import { useGameStore } from '../store/game'
@@ -55,6 +56,7 @@ const diceTableId = morosGameBySlug('dice')?.tableId ?? 1
 const advancedModeIconStyle = {
   '--icon-url': 'url(/icons/right-up.svg)',
 } as CSSProperties
+const TABLE_STATE_FRESH_MS = 5_000
 
 type PlayMode = 'manual' | 'auto' | 'advanced'
 
@@ -167,7 +169,7 @@ function adjustPercentInput(current: string, delta: number, min = 0, max = 1000)
 }
 
 export function DicePage() {
-  const { address, balanceFormatted, connect, ensureGameplaySession, error: walletError, openDiceRound, pendingLabel, status: walletStatus } = useMorosWallet()
+  const { address, balanceFormatted, connect, error: walletError, openDiceRound, pendingLabel, status: walletStatus } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -240,7 +242,10 @@ export function DicePage() {
   const [transientFairnessPhase, setTransientFairnessPhase] = useState<OriginalsFairnessStage>()
   const isAdvancedMode = playMode === 'advanced'
   const isAutomatedMode = playMode === 'auto' || isAdvancedMode
-  const { refreshTableState, tableState } = useTableState(diceTableId, resolvedWalletAddress)
+  const { lastLoadedAt, refreshTableState, tableState } = useTableState(diceTableId, resolvedWalletAddress)
+  const { commitmentReady, takeCommitment } = useOriginalsCommitment(createDiceCommitment, {
+    enabled: accountState.signedIn,
+  })
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? strategies[0],
@@ -541,7 +546,7 @@ export function DicePage() {
     setActiveCommitment(undefined)
     setTransientFairnessPhase('commit')
     const nextClientSeed = roundIndex === 0 && clientSeedDraft ? clientSeedDraft : randomClientSeed()
-    const commitment = await createDiceCommitment()
+    const commitment = await takeCommitment()
     setActiveCommitment(commitment.commitment.commitment_id)
     setTransientFairnessPhase('open')
     setClientSeed(nextClientSeed)
@@ -606,21 +611,31 @@ export function DicePage() {
         throw new Error('Connect a wallet before rolling.')
       }
 
-      setStatusMessage(baseWagerWei === 0n ? 'Starting zero-wager roll...' : 'Preparing round...')
-      if (baseWagerWei > 0n) {
-        await ensureGameplaySession()
-        playerAddress =
-          useAccountStore.getState().walletAddress ??
-          useWalletStore.getState().address ??
-          playerAddress
-      }
+      setStatusMessage(
+        baseWagerWei === 0n
+          ? 'Starting zero-wager roll...'
+          : commitmentReady
+            ? 'Opening round...'
+            : 'Preparing round...',
+      )
+      playerAddress =
+        useAccountStore.getState().walletAddress ??
+        useWalletStore.getState().address ??
+        playerAddress
       if (isAutomatedMode) {
         autoRunStopRef.current = false
         setIsAutoRunning(false)
         setIsAutoStopping(false)
         setAutoHasStartedRound(false)
       }
-      const liveTable = await refreshTableState(playerAddress)
+      const canReuseTableState =
+        Boolean(tableState)
+        && typeof lastLoadedAt === 'number'
+        && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
+        && Date.now() - lastLoadedAt <= TABLE_STATE_FRESH_MS
+      const liveTable = canReuseTableState
+        ? { live_players: undefined, state: tableState! }
+        : await refreshTableState(playerAddress)
       const tableMax = liveTable.state.table.max_wager ? BigInt(liveTable.state.table.max_wager) : undefined
       let playerBalance = liveTable.state.player_balance ? BigInt(liveTable.state.player_balance) : undefined
       const configuredRounds = Math.max(0, Number.parseInt(betCount, 10) || 0)

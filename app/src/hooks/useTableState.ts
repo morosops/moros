@@ -13,12 +13,14 @@ export function useTableState(tableId: number, player?: string | null) {
   const [tableState, setTableState] = useState<BlackjackTableState>()
   const [livePlayers, setLivePlayers] = useState<number>()
   const [isLoading, setIsLoading] = useState(false)
+  const [lastLoadedAt, setLastLoadedAt] = useState<number>()
   const [error, setError] = useState<unknown>()
 
   const refreshTableState = useCallback(async (nextPlayer = player ?? undefined) => {
     const response = await fetchCoordinatorTableState(tableId, nextPlayer)
     setTableState(response.state)
     setLivePlayers(response.live_players)
+    setLastLoadedAt(Date.now())
     setError(undefined)
     return response
   }, [player, tableId])
@@ -39,6 +41,7 @@ export function useTableState(tableId: number, player?: string | null) {
         if (!cancelled) {
           setTableState(response.state)
           setLivePlayers(response.live_players)
+          setLastLoadedAt(Date.now())
           setError(undefined)
         }
       } catch (loadError) {
@@ -68,6 +71,7 @@ export function useTableState(tableId: number, player?: string | null) {
   return {
     error,
     isLoading,
+    lastLoadedAt,
     livePlayers,
     refreshTableState,
     tableState,

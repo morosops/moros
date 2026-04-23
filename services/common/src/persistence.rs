@@ -165,7 +165,8 @@ pub async fn count_live_activity_for_game(
             r#"
                 SELECT COUNT(*)
                 FROM dice_server_commitments
-                WHERE status <> 'settled'
+                WHERE round_id IS NOT NULL
+                  AND status <> 'settled'
                 "#,
         )
         .fetch_one(pool)
@@ -175,7 +176,8 @@ pub async fn count_live_activity_for_game(
             r#"
                 SELECT COUNT(*)
                 FROM roulette_server_commitments
-                WHERE status <> 'settled'
+                WHERE spin_id IS NOT NULL
+                  AND status <> 'settled'
                 "#,
         )
         .fetch_one(pool)
@@ -185,7 +187,8 @@ pub async fn count_live_activity_for_game(
             r#"
                 SELECT COUNT(*)
                 FROM baccarat_server_commitments
-                WHERE status <> 'settled'
+                WHERE round_id IS NOT NULL
+                  AND status <> 'settled'
                 "#,
         )
         .fetch_one(pool)
@@ -477,6 +480,28 @@ pub async fn mark_dice_commitment_settled(
     Ok(())
 }
 
+pub async fn mark_dice_commitment_opened(
+    pool: &PgPool,
+    commitment_id: u64,
+    round_id: u64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE dice_server_commitments
+        SET status = 'opened',
+            round_id = $2,
+            updated_at = NOW()
+        WHERE commitment_id = $1
+        "#,
+    )
+    .bind(i64::try_from(commitment_id).context("commitment id does not fit in i64")?)
+    .bind(i64::try_from(round_id).context("round id does not fit in i64")?)
+    .execute(pool)
+    .await
+    .context("failed to mark dice commitment opened")?;
+    Ok(())
+}
+
 pub async fn create_roulette_server_commitment(
     pool: &PgPool,
     commitment_id: u64,
@@ -570,6 +595,28 @@ pub async fn mark_roulette_commitment_settled(
     Ok(())
 }
 
+pub async fn mark_roulette_commitment_opened(
+    pool: &PgPool,
+    commitment_id: u64,
+    spin_id: u64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE roulette_server_commitments
+        SET status = 'opened',
+            spin_id = $2,
+            updated_at = NOW()
+        WHERE commitment_id = $1
+        "#,
+    )
+    .bind(i64::try_from(commitment_id).context("commitment id does not fit in i64")?)
+    .bind(i64::try_from(spin_id).context("spin id does not fit in i64")?)
+    .execute(pool)
+    .await
+    .context("failed to mark roulette commitment opened")?;
+    Ok(())
+}
+
 pub async fn create_baccarat_server_commitment(
     pool: &PgPool,
     commitment_id: u64,
@@ -660,6 +707,28 @@ pub async fn mark_baccarat_commitment_settled(
     .execute(pool)
     .await
     .context("failed to mark baccarat commitment settled")?;
+    Ok(())
+}
+
+pub async fn mark_baccarat_commitment_opened(
+    pool: &PgPool,
+    commitment_id: u64,
+    round_id: u64,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE baccarat_server_commitments
+        SET status = 'opened',
+            round_id = $2,
+            updated_at = NOW()
+        WHERE commitment_id = $1
+        "#,
+    )
+    .bind(i64::try_from(commitment_id).context("commitment id does not fit in i64")?)
+    .bind(i64::try_from(round_id).context("round id does not fit in i64")?)
+    .execute(pool)
+    .await
+    .context("failed to mark baccarat commitment opened")?;
     Ok(())
 }
 

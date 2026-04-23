@@ -24,11 +24,13 @@ use starknet_crypto::poseidon_hash_many;
 use std::{sync::Arc, time::Duration};
 
 const HAND_POLL_ATTEMPTS: usize = 45;
-const HAND_POLL_DELAY_MS: u64 = 900;
+const HAND_POLL_DELAY_MS: u64 = 350;
 const REWARD_TX_POLL_ATTEMPTS: usize = 90;
 const REWARD_TX_POLL_DELAY_MS: u64 = 1_000;
 const RPC_READ_RETRY_ATTEMPTS: usize = 6;
 const RPC_READ_RETRY_BASE_DELAY_MS: u64 = 150;
+const RPC_WRITE_RETRY_ATTEMPTS: usize = 3;
+const RPC_WRITE_RETRY_BASE_DELAY_MS: u64 = 250;
 const ORIGINALS_SERVER_SEED_DOMAIN: &[u8] = b"MOROS_SERVER_SEED";
 const BLACKJACK_TIMEOUT_BLOCKS: u64 = 50;
 
@@ -200,6 +202,16 @@ impl ChainService {
             || normalized.contains("timeout")
     }
 
+    fn is_retryable_write_error(error: &str) -> bool {
+        let normalized = error.trim().to_ascii_lowercase();
+        normalized.contains("noncetooold")
+            || normalized.contains("nonce too old")
+            || normalized.contains("tx_nonce")
+            || normalized.contains("account_nonce")
+            || normalized.contains("replacement transaction underpriced")
+            || Self::is_retryable_read_error(error)
+    }
+
     async fn provider_call_with_retry(
         &self,
         call: FunctionCall,
@@ -237,6 +249,42 @@ impl ChainService {
         }
 
         Err(last_error.unwrap_or_else(|| anyhow!("Starknet RPC read failed")))
+            .with_context(|| context_label.to_string())
+    }
+
+    async fn send_calls_with_retry(
+        &self,
+        calls: Vec<Call>,
+        context_label: &str,
+    ) -> anyhow::Result<Felt> {
+        let mut last_error: Option<anyhow::Error> = None;
+
+        for attempt in 0..RPC_WRITE_RETRY_ATTEMPTS {
+            match self.account.execute_v3(calls.clone()).send().await {
+                Ok(result) => return Ok(result.transaction_hash),
+                Err(error) => {
+                    let rendered = error.to_string();
+                    if attempt + 1 == RPC_WRITE_RETRY_ATTEMPTS
+                        || !Self::is_retryable_write_error(&rendered)
+                    {
+                        return Err(error).with_context(|| context_label.to_string());
+                    }
+
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_attempts = RPC_WRITE_RETRY_ATTEMPTS,
+                        context = context_label,
+                        error = %rendered,
+                        "retrying transient Starknet RPC write failure"
+                    );
+                    last_error = Some(anyhow!(rendered));
+                    let delay_ms = RPC_WRITE_RETRY_BASE_DELAY_MS * (1_u64 << attempt);
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow!("Starknet RPC write failed")))
             .with_context(|| context_label.to_string())
     }
 
@@ -678,17 +726,17 @@ impl ChainService {
             .context("MOROS_REWARDS_TREASURY_ADDRESS is required for reward credits")?;
         let credit_selector = get_selector_from_name("credit_to_vault")
             .context("missing selector for credit_to_vault")?;
-        let result = self
-            .account
-            .execute_v3(vec![Call {
-                to: rewards_treasury,
-                selector: credit_selector,
-                calldata: vec![player_felt, Felt::from(amount)],
-            }])
-            .send()
-            .await
-            .context("failed to submit reward treasury credit")?;
-        Ok(format!("{:#x}", result.transaction_hash))
+        let tx_hash = self
+            .send_calls_with_retry(
+                vec![Call {
+                    to: rewards_treasury,
+                    selector: credit_selector,
+                    calldata: vec![player_felt, Felt::from(amount)],
+                }],
+                "failed to submit reward treasury credit",
+            )
+            .await?;
+        Ok(format!("{tx_hash:#x}"))
     }
 
     pub async fn wait_for_transaction_success(&self, tx_hash: &str) -> anyhow::Result<()> {
@@ -900,6 +948,26 @@ impl ChainService {
         )
     }
 
+    pub async fn wait_for_dice_round_for_commitment(
+        &self,
+        commitment_id: u64,
+    ) -> anyhow::Result<u64> {
+        let mut last_error = None;
+        for _ in 0..HAND_POLL_ATTEMPTS {
+            match self.fetch_dice_round_for_commitment(commitment_id).await {
+                Ok(round_id) if round_id != 0 => return Ok(round_id),
+                Ok(_) => {}
+                Err(error) => last_error = Some(error),
+            }
+            tokio::time::sleep(Duration::from_millis(HAND_POLL_DELAY_MS)).await;
+        }
+
+        if let Some(error) = last_error {
+            return Err(error).context("timed out waiting for dice round attachment");
+        }
+        bail!("timed out waiting for dice round attachment");
+    }
+
     pub async fn open_dice_round(
         &self,
         player: &str,
@@ -929,7 +997,6 @@ impl ChainService {
                 ],
             )
             .await?;
-        self.wait_for_dice_round(expected_round_id).await?;
         Ok((expected_round_id, format!("{tx_hash:#x}")))
     }
 
@@ -975,8 +1042,6 @@ impl ChainService {
             calldata.extend([Felt::from(kind), Felt::from(selection), Felt::from(amount)]);
         }
         let tx_hash = self.invoke(roulette_table, "open_spin", calldata).await?;
-        self.wait_for_roulette_spin_status(expected_spin_id, "active")
-            .await?;
         Ok((expected_spin_id, format!("{tx_hash:#x}")))
     }
 
@@ -1233,6 +1298,25 @@ impl ChainService {
                 .context("get_spin_for_commitment returned no value")?,
             "spin_for_commitment",
         )
+    }
+
+    pub async fn wait_for_roulette_spin_for_commitment(
+        &self,
+        commitment_id: u64,
+    ) -> anyhow::Result<u64> {
+        let mut last_error = None;
+        for _ in 0..HAND_POLL_ATTEMPTS {
+            match self.fetch_roulette_spin_for_commitment(commitment_id).await {
+                Ok(spin_id) if spin_id != 0 => return Ok(spin_id),
+                Ok(_) => {}
+                Err(error) => last_error = Some(error),
+            }
+            tokio::time::sleep(Duration::from_millis(HAND_POLL_DELAY_MS)).await;
+        }
+        if let Some(error) = last_error {
+            return Err(error).context("timed out waiting for roulette spin attachment");
+        }
+        bail!("timed out waiting for roulette spin attachment");
     }
 
     pub async fn settle_roulette_spin(
@@ -1524,6 +1608,28 @@ impl ChainService {
         )
     }
 
+    pub async fn wait_for_baccarat_round_for_commitment(
+        &self,
+        commitment_id: u64,
+    ) -> anyhow::Result<u64> {
+        let mut last_error = None;
+        for _ in 0..HAND_POLL_ATTEMPTS {
+            match self
+                .fetch_baccarat_round_for_commitment(commitment_id)
+                .await
+            {
+                Ok(round_id) if round_id != 0 => return Ok(round_id),
+                Ok(_) => {}
+                Err(error) => last_error = Some(error),
+            }
+            tokio::time::sleep(Duration::from_millis(HAND_POLL_DELAY_MS)).await;
+        }
+        if let Some(error) = last_error {
+            return Err(error).context("timed out waiting for baccarat round attachment");
+        }
+        bail!("timed out waiting for baccarat round attachment");
+    }
+
     pub async fn peek_next_baccarat_round_id(&self) -> anyhow::Result<u64> {
         let baccarat_table = self.baccarat_table()?;
         let values = self
@@ -1564,8 +1670,6 @@ impl ChainService {
                     Felt::from(commitment_id),
                 ],
             )
-            .await?;
-        self.wait_for_baccarat_round_status(expected_round_id, "active")
             .await?;
         Ok((expected_round_id, format!("{tx_hash:#x}")))
     }
@@ -1990,23 +2094,23 @@ impl ChainService {
         let open_selector = get_selector_from_name("open_hand_verified")
             .context("missing selector for open_hand_verified")?;
         let tx_hash = self
-            .account
-            .execute_v3(vec![
-                Call {
-                    to: self.contracts.deck_commitment,
-                    selector: commitment_selector,
-                    calldata: commitment_calldata,
-                },
-                Call {
-                    to: self.contracts.blackjack_table,
-                    selector: open_selector,
-                    calldata: open_calldata,
-                },
-            ])
-            .send()
+            .send_calls_with_retry(
+                vec![
+                    Call {
+                        to: self.contracts.deck_commitment,
+                        selector: commitment_selector,
+                        calldata: commitment_calldata,
+                    },
+                    Call {
+                        to: self.contracts.blackjack_table,
+                        selector: open_selector,
+                        calldata: open_calldata,
+                    },
+                ],
+                "failed to submit verified blackjack hand opening",
+            )
             .await?;
-        self.wait_for_hand(expected_hand_id, |_| true).await?;
-        Ok((expected_hand_id, format!("{:#x}", tx_hash.transaction_hash)))
+        Ok((expected_hand_id, format!("{tx_hash:#x}")))
     }
 
     pub async fn submit_hit(
@@ -2558,17 +2662,17 @@ impl ChainService {
     ) -> anyhow::Result<Felt> {
         let selector = get_selector_from_name(selector_name)
             .with_context(|| format!("missing selector for {selector_name}"))?;
-        let result = self
-            .account
-            .execute_v3(vec![Call {
-                to,
-                selector,
-                calldata,
-            }])
-            .send()
-            .await
-            .with_context(|| format!("failed to invoke {selector_name}"))?;
-        Ok(result.transaction_hash)
+        let tx_hash = self
+            .send_calls_with_retry(
+                vec![Call {
+                    to,
+                    selector,
+                    calldata,
+                }],
+                &format!("failed to invoke {selector_name}"),
+            )
+            .await?;
+        Ok(tx_hash)
     }
 
     async fn call_contract(

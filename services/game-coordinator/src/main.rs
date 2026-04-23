@@ -1264,6 +1264,9 @@ async fn open_dice_round(
         Ok(result) => result,
         Err(error) => return Err(ApiError::internal(error)),
     };
+    persistence::mark_dice_commitment_opened(database, payload.commitment_id, round_id)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(OpenGameplayResponse {
         game_id: round_id,
         tx_hash,
@@ -1337,6 +1340,9 @@ async fn open_roulette_spin(
         Ok(result) => result,
         Err(error) => return Err(ApiError::internal(error)),
     };
+    persistence::mark_roulette_commitment_opened(database, payload.commitment_id, spin_id)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(OpenGameplayResponse {
         game_id: spin_id,
         tx_hash,
@@ -1395,6 +1401,9 @@ async fn open_baccarat_round(
         Ok(result) => result,
         Err(error) => return Err(ApiError::internal(error)),
     };
+    persistence::mark_baccarat_commitment_opened(database, payload.commitment_id, round_id)
+        .await
+        .map_err(ApiError::internal)?;
     Ok(Json(OpenGameplayResponse {
         game_id: round_id,
         tx_hash,
@@ -1466,14 +1475,9 @@ async fn settle_dice_commitment(
         return Err(ApiError::bad_request("dice commitment is already settled"));
     }
     let round_id = chain
-        .fetch_dice_round_for_commitment(commitment_id)
+        .wait_for_dice_round_for_commitment(commitment_id)
         .await
         .map_err(ApiError::internal)?;
-    if round_id == 0 {
-        return Err(ApiError::bad_request(
-            "dice commitment has not been used by a round",
-        ));
-    }
     let server_seed = felt_from_dec_or_hex(&commitment.server_seed)
         .map_err(|error| ApiError::bad_request(format!("invalid stored server seed: {error}")))?;
     let (round, tx_hash) = chain
@@ -1572,14 +1576,9 @@ async fn settle_roulette_commitment(
         ));
     }
     let spin_id = chain
-        .fetch_roulette_spin_for_commitment(commitment_id)
+        .wait_for_roulette_spin_for_commitment(commitment_id)
         .await
         .map_err(ApiError::internal)?;
-    if spin_id == 0 {
-        return Err(ApiError::bad_request(
-            "roulette commitment has not been used by a spin",
-        ));
-    }
     let server_seed = felt_from_dec_or_hex(&commitment.server_seed)
         .map_err(|error| ApiError::bad_request(format!("invalid stored server seed: {error}")))?;
     let (spin, tx_hash) = chain
@@ -1678,14 +1677,9 @@ async fn settle_baccarat_commitment(
         ));
     }
     let round_id = chain
-        .fetch_baccarat_round_for_commitment(commitment_id)
+        .wait_for_baccarat_round_for_commitment(commitment_id)
         .await
         .map_err(ApiError::internal)?;
-    if round_id == 0 {
-        return Err(ApiError::bad_request(
-            "baccarat commitment has not been used by a round",
-        ));
-    }
     let server_seed = felt_from_dec_or_hex(&commitment.server_seed)
         .map_err(|error| ApiError::bad_request(format!("invalid stored server seed: {error}")))?;
     let (round, tx_hash) = chain

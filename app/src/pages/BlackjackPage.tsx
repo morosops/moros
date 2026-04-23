@@ -12,8 +12,14 @@ import {
 import { GameUtilityBar } from '../components/GameUtilityBar'
 import { useMorosAuthRuntime } from '../components/MorosAuthProvider'
 import { deriveMorosAccountState, resolveMorosPrimaryActionLabel } from '../lib/account-state'
+import { morosConfig } from '../lib/config'
 import { morosGameBySlug } from '../lib/game-config'
-import { clearStoredGameplaySession } from '../lib/gameplay-session'
+import {
+  clearStoredGameplaySession,
+  gameplaySessionMatchesAddress,
+  gameplaySessionMatchesKey,
+  readStoredGameplaySession,
+} from '../lib/gameplay-session'
 import { useMorosWallet } from '../hooks/useMorosWallet'
 import { PlayingCard, type PlayingCardSuit } from '../components/PlayingCard'
 import { useAccountStore } from '../store/account'
@@ -22,6 +28,7 @@ import { useWalletStore } from '../store/wallet'
 const tableIds: Record<string, number> = {
   'blackjack-main-floor': morosGameBySlug('blackjack')?.tableId ?? 2,
 }
+const TABLE_STATE_FRESH_MS = 5_000
 
 function rankLabel(card?: number | null) {
   if (!card) {
@@ -136,6 +143,21 @@ function formatBlackjackTotal(total?: number | null, soft?: boolean | null) {
   return `${total - 10}/${total}`
 }
 
+function readCachedGameplaySessionToken(playerAddress?: string) {
+  const session = readStoredGameplaySession()
+  const nowUnix = Math.floor(Date.now() / 1000)
+  if (
+    !session
+    || session.expiresAtUnix <= nowUnix + 5
+    || !gameplaySessionMatchesAddress(session, playerAddress)
+    || !gameplaySessionMatchesKey(session, morosConfig.gameplaySessionKey)
+  ) {
+    return undefined
+  }
+
+  return session.sessionToken
+}
+
 function actionLabel(action: string) {
   switch (action) {
     case 'hit':
@@ -210,6 +232,7 @@ export function BlackjackPage() {
   const [fairnessArtifact, setFairnessArtifact] = useState<BlackjackFairnessArtifactView>()
   const [session, setSession] = useState<{ session_id: string; relay_token: string }>()
   const [tableState, setTableState] = useState<BlackjackTableState>()
+  const [tableStateLoadedAt, setTableStateLoadedAt] = useState<number>()
   const [statusMessage, setStatusMessage] = useState<string>()
   const [actionPending, setActionPending] = useState<string>()
   const [createPending, setCreatePending] = useState(false)
@@ -276,8 +299,12 @@ export function BlackjackPage() {
     }
 
     let cancelled = false
-    void ensureGameplaySession()
-      .then((sessionToken) => fetchCoordinatorHandFairness(hand.hand_id, sessionToken))
+    const sessionToken = readCachedGameplaySessionToken(resolvedWalletAddress ?? hand.player)
+    if (!sessionToken) {
+      return
+    }
+
+    void fetchCoordinatorHandFairness(hand.hand_id, sessionToken)
       .then((artifact) => {
         if (!cancelled) {
           setFairnessArtifact(artifact)
@@ -292,7 +319,7 @@ export function BlackjackPage() {
     return () => {
       cancelled = true
     }
-  }, [hand?.hand_id, hand?.status])
+  }, [hand?.hand_id, hand?.status, hand?.player, resolvedWalletAddress])
 
   useEffect(() => {
     const currentCardCount =
@@ -339,8 +366,16 @@ export function BlackjackPage() {
         useAccountStore.getState().walletAddress ??
         useWalletStore.getState().address ??
         playerAddress
-      const liveTable = await fetchCoordinatorTableState(tableId, playerAddress)
+      const canReuseTableState =
+        Boolean(tableState)
+        && typeof tableStateLoadedAt === 'number'
+        && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
+        && Date.now() - tableStateLoadedAt <= TABLE_STATE_FRESH_MS
+      const liveTable = canReuseTableState
+        ? { live_players: undefined, state: tableState! }
+        : await fetchCoordinatorTableState(tableId, playerAddress)
       setTableState(liveTable.state)
+      setTableStateLoadedAt(Date.now())
       const liveMaxWager = BigInt(liveTable.state.table.max_wager)
       if (liveMaxWager > 0n && wagerValue > liveMaxWager) {
         throw new Error(`Moros currently allows wagers up to ${formatStrk(liveTable.state.table.max_wager)} on this table.`)
@@ -352,6 +387,7 @@ export function BlackjackPage() {
         await fund(formatWagerInput(bankrollShortfall))
         const refreshedTable = await fetchCoordinatorTableState(tableId, playerAddress)
         setTableState(refreshedTable.state)
+        setTableStateLoadedAt(Date.now())
       }
       let created
       try {
@@ -375,7 +411,11 @@ export function BlackjackPage() {
           client_seed: randomClientSeed(),
         }, gameplaySessionToken)
       }
-      const handRecord = await fetchCoordinatorHandView(created.hand_id, gameplaySessionToken)
+      const [handRecord, refreshedTable, fairnessRecord] = await Promise.all([
+        fetchCoordinatorHandView(created.hand_id, gameplaySessionToken),
+        fetchCoordinatorTableState(tableId, playerAddress),
+        fetchCoordinatorHandFairness(created.hand_id, gameplaySessionToken).catch(() => undefined),
+      ])
       if (requestId !== createRequestIdRef.current) {
         return
       }
@@ -389,7 +429,11 @@ export function BlackjackPage() {
         session_id: created.session_id,
         relay_token: created.relay_token,
       })
-      setTableState((await fetchCoordinatorTableState(tableId, playerAddress)).state)
+      setTableState(refreshedTable.state)
+      setTableStateLoadedAt(Date.now())
+      if (fairnessRecord) {
+        setFairnessArtifact(fairnessRecord)
+      }
       setStatusMessage(`Hand ${created.hand_id} is open on Starknet and mirrored into the Moros runtime.`)
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'Failed to create hand.')
@@ -428,9 +472,41 @@ export function BlackjackPage() {
         relay_token: activeRuntime.relayToken,
       })
       setStatusMessage(relay.status === 'completed' ? `${label} applied.` : `${label} submitted.`)
-      const sessionToken = await ensureGameplaySession()
-      setHand(await fetchCoordinatorHandView(activeRuntime.handId, sessionToken))
-      setTableState((await fetchCoordinatorTableState(tableIds[selectedTable] ?? 2, resolvedWalletAddress)).state)
+      const nextHand = relay.hand
+      if (nextHand) {
+        setHand(nextHand)
+        if (nextHand.phase === 'settled') {
+          activeRuntimeRef.current = undefined
+          setSession(undefined)
+        }
+      }
+      const sessionToken = readCachedGameplaySessionToken(
+        resolvedWalletAddress ?? nextHand?.player ?? hand.player,
+      )
+      const [refreshedHand, nextTableState, nextFairness] = await Promise.all([
+        sessionToken
+          ? fetchCoordinatorHandView(activeRuntime.handId, sessionToken).catch(() => nextHand)
+          : Promise.resolve(nextHand),
+        fetchCoordinatorTableState(
+          tableIds[selectedTable] ?? 2,
+          resolvedWalletAddress ?? nextHand?.player ?? hand.player,
+        ),
+        sessionToken
+          ? fetchCoordinatorHandFairness(activeRuntime.handId, sessionToken).catch(() => undefined)
+          : Promise.resolve(undefined),
+      ])
+      if (refreshedHand) {
+        setHand(refreshedHand)
+        if (refreshedHand.phase === 'settled') {
+          activeRuntimeRef.current = undefined
+          setSession(undefined)
+        }
+      }
+      setTableState(nextTableState.state)
+      setTableStateLoadedAt(Date.now())
+      if (nextFairness) {
+        setFairnessArtifact(nextFairness)
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to relay action.'
       if (message.includes('relay token does not match active runtime')) {

@@ -35,6 +35,7 @@ const utilityNav = [
   { navIcon: '/icons/ranking.svg', label: 'Leaderboard', to: '/leaderboard' },
 ] as const
 const FUNDING_PROMPT_KEY_PREFIX = 'moros.funding.prompted.'
+const HEADER_BALANCE_POLL_MS = 5_000
 
 function shortAddress(address?: string) {
   if (!address) {
@@ -183,12 +184,14 @@ export function AppShell() {
     connectExternal,
     disconnect,
     ensureGameplaySession,
+    prewarmGameplaySession,
     listExternalWallets,
     pendingLabel,
     restore,
     signTypedData,
     status,
     strategy,
+    warmConnect,
     withdraw,
   } = useMorosWallet()
   const usernameFromProfile = useProfileStore((state) => state.username)
@@ -408,11 +411,22 @@ export function AppShell() {
     void load()
     const interval = window.setInterval(() => {
       void load()
-    }, 12000)
+    }, HEADER_BALANCE_POLL_MS)
+
+    const refreshOnForeground = () => {
+      if (document.visibilityState === 'visible') {
+        void load()
+      }
+    }
+
+    window.addEventListener('focus', refreshOnForeground)
+    document.addEventListener('visibilitychange', refreshOnForeground)
 
     return () => {
       cancelled = true
       window.clearInterval(interval)
+      window.removeEventListener('focus', refreshOnForeground)
+      document.removeEventListener('visibilitychange', refreshOnForeground)
     }
   }, [resolvedWalletAddress])
 
@@ -445,6 +459,43 @@ export function AppShell() {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [profileMenuOpen, walletPopoverOpen])
+
+  useEffect(() => {
+    if (isGameRoute) {
+      warmConnect()
+    }
+  }, [isGameRoute, warmConnect])
+
+  useEffect(() => {
+    if (
+      !isGameRoute ||
+      !signedIn ||
+      !resolvedWalletAddress ||
+      !walletActionReady ||
+      walletBusy ||
+      accountProvisioning ||
+      strategy === 'external'
+    ) {
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      void prewarmGameplaySession()
+    }, 120)
+
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [
+    accountProvisioning,
+    isGameRoute,
+    prewarmGameplaySession,
+    resolvedWalletAddress,
+    signedIn,
+    strategy,
+    walletActionReady,
+    walletBusy,
+  ])
 
   useEffect(() => {
     if (!resolvedWalletAddress) {

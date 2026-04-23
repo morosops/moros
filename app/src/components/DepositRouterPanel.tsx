@@ -47,6 +47,8 @@ const ENABLED_DEPOSIT_MATRIX = new Set([
 ])
 
 const MAX_AUTH_PREPARATION_RETRIES = 4
+const DEPOSIT_STATUS_POLL_MS = 4_000
+const AUTH_PREPARATION_RETRY_MS = 250
 
 function formatRouteError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
@@ -402,13 +404,21 @@ export function DepositRouterPanel({
     setPanelMessage(undefined)
 
     const createChannel = async () => {
+      if (walletAddress) {
+        return createDepositChannel({
+          wallet_address: walletAddress,
+          asset_id: selectedAsset.id,
+          chain_key: selectedAsset.chain_key,
+        })
+      }
+
       let requestToken = idToken
 
       if (!requestToken && resolveIdToken) {
         requestToken = (await resolveIdToken()) ?? undefined
       }
 
-      if (!walletAddress && !requestToken) {
+      if (!requestToken) {
         setChannelResponse(undefined)
         setStatusResponse(undefined)
         setQrDataUrl(undefined)
@@ -426,7 +436,7 @@ export function DepositRouterPanel({
           if (!cancelled) {
             setChannelRetryKey((current) => current + 1)
           }
-        }, 600)
+        }, AUTH_PREPARATION_RETRY_MS)
         return
       }
 
@@ -436,12 +446,7 @@ export function DepositRouterPanel({
       }
 
       try {
-        return requestToken
-          ? await createAuthenticatedDepositChannel(requestToken, requestBody)
-          : await createDepositChannel({
-              wallet_address: walletAddress!,
-              ...requestBody,
-            })
+        return await createAuthenticatedDepositChannel(requestToken, requestBody)
       } catch (error) {
         if (requestToken && resolveIdToken) {
           const refreshedToken = (await resolveIdToken()) ?? undefined
@@ -530,7 +535,7 @@ export function DepositRouterPanel({
     void load()
     const interval = window.setInterval(() => {
       void load()
-    }, 10_000)
+    }, DEPOSIT_STATUS_POLL_MS)
 
     return () => {
       cancelled = true
