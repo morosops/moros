@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   createCoordinatorHand,
   fetchCoordinatorHandFairness,
@@ -271,6 +271,13 @@ export function BlackjackPage() {
           { id: 'split', label: 'Split' },
           { id: 'double', label: 'Double' },
         ]
+  const expectedProfit = useMemo(() => {
+    try {
+      return formatStrk(parseStrkInput(wager).toString())
+    } catch {
+      return '0 STRK'
+    }
+  }, [wager])
 
   function adjustWager(next: 'half' | 'double') {
     try {
@@ -615,7 +622,7 @@ export function BlackjackPage() {
           <section className="blackjack-sidebar__section">
             <div className="blackjack-sidebar__label-row">
               <span>Bet Amount</span>
-              <strong>{liveMaxHand}</strong>
+              <strong>MAX {liveMaxHand}</strong>
             </div>
             <div className="blackjack-bet-row">
               <label className="dice-token-input">
@@ -631,6 +638,16 @@ export function BlackjackPage() {
               <button className="chip" onClick={() => adjustWager('half')} type="button">½</button>
               <button className="chip" onClick={() => adjustWager('double')} type="button">2×</button>
             </div>
+          </section>
+
+          <section className="blackjack-sidebar__section">
+            <div className="blackjack-sidebar__label-row">
+              <span>Profit on Win</span>
+              <strong>{expectedProfit}</strong>
+            </div>
+            <label className="dice-token-input">
+              <input className="text-input text-input--large dice-token-input__field" readOnly value={expectedProfit.replace(' STRK', '')} />
+            </label>
           </section>
 
           <section className="blackjack-sidebar__section blackjack-sidebar__section--actions">

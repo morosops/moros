@@ -49,6 +49,7 @@ const roulettePocketRingOuterRadius = 112
 const roulettePocketRingInnerRadius = 76
 const rouletteBallTrackRadius = 182
 const TABLE_STATE_FRESH_MS = 5_000
+const ROULETTE_DEFAULT_HOUSE_EDGE_BPS = 9730n
 
 type BetDraft = {
   key: string
@@ -192,6 +193,67 @@ function compactBetLabel(kind: number, selection: number) {
   }
 }
 
+function roulettePayoutMultiplier(kind: number, selection: number) {
+  switch (kind) {
+    case 0:
+      return selection >= 0 && selection <= 36 ? 36n : 0n
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+      return 2n
+    case 7:
+    case 8:
+      return selection >= 1 && selection <= 3 ? 3n : 0n
+    case 9:
+      return selection >= 0 && selection < 12 ? 12n : 0n
+    case 10:
+      if (selection >= 100 && selection <= 102) {
+        return 18n
+      }
+      if (selection >= 40) {
+        return 18n
+      }
+      return selection >= 1 && selection <= 33 ? 18n : 0n
+    case 11:
+      return selection >= 1 && selection <= 32 ? 9n : 0n
+    case 12:
+      return selection >= 0 && selection < 11 ? 6n : 0n
+    case 13:
+      return selection === 0 ? 9n : 0n
+    default:
+      return 0n
+  }
+}
+
+function estimateRouletteProfitOnWin(bets: BetDraft[]) {
+  if (bets.length === 0) {
+    return 0n
+  }
+
+  const totalWager = bets.reduce((sum, bet) => sum + bet.amountWei, 0n)
+  let bestProfit = 0n
+
+  for (let result = 0; result <= 36; result += 1) {
+    let payout = 0n
+    for (const bet of bets) {
+      if (!spinMatchesBet(result, bet.kind, bet.selection)) {
+        continue
+      }
+      const multiplier = roulettePayoutMultiplier(bet.kind, bet.selection)
+      payout += (bet.amountWei * multiplier * ROULETTE_DEFAULT_HOUSE_EDGE_BPS) / ROULETTE_DEFAULT_HOUSE_EDGE_BPS
+    }
+    const profit = payout > totalWager ? payout - totalWager : 0n
+    if (profit > bestProfit) {
+      bestProfit = profit
+    }
+  }
+
+  return bestProfit
+}
+
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
@@ -258,7 +320,15 @@ function roulettePocketFill(value: number) {
 }
 
 export function RoulettePage() {
-  const { address, connect, error: walletError, openRouletteSpin, pendingLabel, status: walletStatus } = useMorosWallet()
+  const {
+    address,
+    connect,
+    ensureGameplaySession,
+    error: walletError,
+    openRouletteSpin,
+    pendingLabel,
+    status: walletStatus,
+  } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -672,25 +742,28 @@ export function RoulettePage() {
         && typeof lastLoadedAt === 'number'
         && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
         && Date.now() - lastLoadedAt <= TABLE_STATE_FRESH_MS
-      const [liveTable, commitment] = await Promise.all([
-        canReuseTableState
-          ? Promise.resolve({ live_players: undefined, state: tableState! })
-          : refreshTableState(playerAddress),
-        takeCommitment(),
-      ])
-      setActiveCommitment(commitment.commitment.commitment_id)
-      setTransientFairnessPhase('open')
+      const liveTable = canReuseTableState
+        ? { live_players: undefined, state: tableState! }
+        : await refreshTableState(playerAddress)
       const clientSeed = clientSeedDraft ?? randomClientSeed()
       const bankrollBalanceWei = liveTable.state.player_balance ?? '0'
       const bankrollShortfall =
         totalWagerWei > BigInt(bankrollBalanceWei) ? totalWagerWei - BigInt(bankrollBalanceWei) : 0n
+      if (bankrollShortfall > 0n) {
+        throw new Error('Deposit STRK into your Moros balance before betting.')
+      }
+      setStatusMessage('Authorizing gameplay...')
+      await ensureGameplaySession()
+      setTransientFairnessPhase('commit')
+      setStatusMessage('Preparing roulette commitment...')
+      const commitment = await takeCommitment()
+      setActiveCommitment(commitment.commitment.commitment_id)
+      setTransientFairnessPhase('open')
       setClientSeedDraft(undefined)
       setStatusMessage(
-        bankrollShortfall > 0n
-          ? 'Deposit STRK into your Moros balance before betting.'
-          : commitmentReady
-            ? 'Opening the spin...'
-            : 'Roulette seed hash committed. Opening the spin...',
+        commitmentReady
+          ? 'Opening the spin...'
+          : 'Roulette seed hash committed. Opening the spin...',
       )
       await openRouletteSpin({
         tableId: rouletteTableId,
@@ -756,6 +829,7 @@ export function RoulettePage() {
       readyLabel: 'Bet',
       walletBusy,
     })
+  const expectedProfit = useMemo(() => formatStrk(estimateRouletteProfitOnWin(bets).toString()), [bets])
   const spinOutcome = spin ? playerOutcomeTone(spin.payout, spin.wager) : undefined
 
   function rouletteBetOutcome(kind: number, selection: number) {
@@ -813,6 +887,16 @@ export function RoulettePage() {
               <button className="chip" onClick={() => scaleBets('half')} type="button">½</button>
               <button className="chip" onClick={() => scaleBets('double')} type="button">2×</button>
             </div>
+          </section>
+
+          <section className="roulette-sidebar__section">
+            <div className="roulette-sidebar__label-row">
+              <span>Profit on Win</span>
+              <strong>{expectedProfit}</strong>
+            </div>
+            <label className="dice-token-input">
+              <input className="text-input text-input--large dice-token-input__field" readOnly value={expectedProfit.replace(' STRK', '')} />
+            </label>
           </section>
 
           <div className="roulette-sidebar__footer">

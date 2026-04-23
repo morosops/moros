@@ -66,6 +66,19 @@ function labelForSide(side: number) {
   return 'Tie'
 }
 
+function baccaratProfitOnWin(wager: bigint, side: number) {
+  if (wager <= 0n) {
+    return 0n
+  }
+  if (side === 1) {
+    return (wager * 95n) / 100n
+  }
+  if (side === 2) {
+    return wager * 8n
+  }
+  return wager
+}
+
 async function baccaratCardCommitment(
   roundId: number,
   handIndex: number,
@@ -269,7 +282,15 @@ function playPickupSoundBurst(count: number) {
 }
 
 export function BaccaratPage() {
-  const { address, connect, error: walletError, openBaccaratRound, pendingLabel, status: walletStatus } = useMorosWallet()
+  const {
+    address,
+    connect,
+    ensureGameplaySession,
+    error: walletError,
+    openBaccaratRound,
+    pendingLabel,
+    status: walletStatus,
+  } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -309,6 +330,14 @@ export function BaccaratPage() {
     () => betZones.filter((zone) => (zoneBets[zone.id] ?? 0n) > 0n),
     [zoneBets],
   )
+  const expectedProfit = useMemo(() => {
+    const activeZone = activeBets[0]
+    if (!activeZone) {
+      return '0 STRK'
+    }
+    return formatStrk(baccaratProfitOnWin(zoneBets[activeZone.id] ?? 0n, activeZone.id).toString())
+  }, [activeBets, zoneBets])
+
   useEffect(() => {
     let cancelled = false
 
@@ -443,24 +472,27 @@ export function BaccaratPage() {
         && typeof lastLoadedAt === 'number'
         && resolvedWalletAddress?.toLowerCase() === playerAddress.toLowerCase()
         && Date.now() - lastLoadedAt <= TABLE_STATE_FRESH_MS
-      const [liveTable, commitment] = await Promise.all([
-        canReuseTableState
-          ? Promise.resolve({ live_players: undefined, state: tableState! })
-          : refreshTableState(playerAddress),
-        takeCommitment(),
-      ])
-      setActiveCommitment(commitment.commitment.commitment_id)
-      setTransientFairnessPhase('open')
+      const liveTable = canReuseTableState
+        ? { live_players: undefined, state: tableState! }
+        : await refreshTableState(playerAddress)
       const clientSeed = clientSeedDraft ?? randomClientSeed()
       const bankrollBalanceWei = liveTable.state.player_balance ?? '0'
       const bankrollShortfall = BigInt(wagerWei) > BigInt(bankrollBalanceWei) ? BigInt(wagerWei) - BigInt(bankrollBalanceWei) : 0n
+      if (bankrollShortfall > 0n) {
+        throw new Error('Deposit STRK into your Moros balance before betting.')
+      }
+      setStatusMessage('Authorizing gameplay...')
+      await ensureGameplaySession()
+      setTransientFairnessPhase('commit')
+      setStatusMessage('Preparing baccarat commitment...')
+      const commitment = await takeCommitment()
+      setActiveCommitment(commitment.commitment.commitment_id)
+      setTransientFairnessPhase('open')
       setClientSeedDraft(undefined)
       setStatusMessage(
-        bankrollShortfall > 0n
-          ? 'Deposit STRK into your Moros balance before betting.'
-          : commitmentReady
-            ? 'Opening the deal...'
-            : 'Baccarat seed hash committed. Opening the deal...',
+        commitmentReady
+          ? 'Opening the deal...'
+          : 'Baccarat seed hash committed. Opening the deal...',
       )
       await openBaccaratRound({
         tableId: baccaratTableId,
@@ -580,6 +612,16 @@ export function BaccaratPage() {
               <button className="chip" onClick={() => scaleBets('half')} type="button">½</button>
               <button className="chip" onClick={() => scaleBets('double')} type="button">2×</button>
             </div>
+          </section>
+
+          <section className="baccarat-sidebar__section">
+            <div className="baccarat-sidebar__label-row">
+              <span>Profit on Win</span>
+              <strong>{expectedProfit}</strong>
+            </div>
+            <label className="dice-token-input">
+              <input className="text-input text-input--large dice-token-input__field" readOnly value={expectedProfit.replace(' STRK', '')} />
+            </label>
           </section>
 
           <div className="baccarat-sidebar__footer">
