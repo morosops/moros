@@ -111,6 +111,21 @@ function isUndeployedAccountError(error: unknown) {
   return error instanceof Error && error.message.includes('Account is not deployed.')
 }
 
+function shouldFallbackToPrivyBridge(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const message = error.message.toLowerCase()
+  return (
+    message.includes('wallet not found') ||
+    message.includes('wallet is not ready') ||
+    message.includes('user interaction required') ||
+    message.includes('not linked to this moros user') ||
+    message.includes('requested wallet is not owned by this moros user')
+  )
+}
+
 async function ensureMorosWalletReady(
   wallet: MorosWallet,
   onProgress?: (event: { step: 'CONNECTED' | 'CHECK_DEPLOYED' | 'DEPLOYING' | 'FAILED' | 'READY' }) => void,
@@ -320,6 +335,18 @@ export async function connectMorosPrivyWallet(
       const normalizedHash = (hash.startsWith('0x') ? hash : `0x${hash}`) as `0x${string}`
       const latestSigningToken =
         (await options.resolveSigningToken?.()) ?? options.signingToken ?? options.idToken
+      if (options.signRawHash) {
+        try {
+          return await options.signRawHash({
+            address: privyWallet.wallet_address,
+            hash: normalizedHash,
+          })
+        } catch (error) {
+          if (!shouldFallbackToPrivyBridge(error)) {
+            throw error
+          }
+        }
+      }
       try {
         return await signMorosPrivyWalletHash({
           idToken: options.idToken,
@@ -331,7 +358,7 @@ export async function connectMorosPrivyWallet(
         if (!options.signRawHash) {
           throw error
         }
-        return options.signRawHash({
+        return await options.signRawHash({
           address: privyWallet.wallet_address,
           hash: normalizedHash,
         })

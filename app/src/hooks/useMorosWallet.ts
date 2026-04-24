@@ -40,6 +40,7 @@ let privyConnectPromise:
   | Promise<{ address: string; strategy: 'external' | 'privy'; walletLink?: unknown }>
   | null = null
 let gameplaySessionPromise: Promise<string> | null = null
+let gameplaySessionPromiseMode: 'background' | 'foreground' | null = null
 
 async function loadStarkzap() {
   if (!starkzapModulePromise) {
@@ -433,10 +434,15 @@ export function useMorosWallet() {
   }, [accountRequiredMessage, reconnectForInteraction, store])
 
   const ensureGameplaySessionInternal = useCallback(async (
-    options?: { background?: boolean; suppressStoreError?: boolean },
+    options?: {
+      background?: boolean
+      suppressStoreError?: boolean
+      retryAfterBackgroundFailure?: boolean
+    },
   ) => {
     const background = Boolean(options?.background)
     const suppressStoreError = Boolean(options?.suppressStoreError)
+    const retryAfterBackgroundFailure = options?.retryAfterBackgroundFailure !== false
     let currentState = await ensureCanonicalPrivyWallet()
     const connectedWallet = currentState.wallet
     const connectedAddress = currentState.address
@@ -462,7 +468,36 @@ export function useMorosWallet() {
       if (!background) {
         store.setPreparing('Authorizing gameplay...')
       }
-      return gameplaySessionPromise
+      const sharedMode = gameplaySessionPromiseMode
+      try {
+        const sessionToken = await gameplaySessionPromise
+        if (!background) {
+          store.setReady()
+        }
+        return sessionToken
+      } catch (error) {
+        const canRetryForeground =
+          !background &&
+          retryAfterBackgroundFailure &&
+          sharedMode === 'background'
+
+        if (canRetryForeground) {
+          gameplaySessionPromise = null
+          gameplaySessionPromiseMode = null
+          return ensureGameplaySessionInternal({
+            background: false,
+            suppressStoreError,
+            retryAfterBackgroundFailure: false,
+          })
+        }
+
+        if (!background && !suppressStoreError) {
+          store.setError(normalizeWalletError(error, 'Gameplay authorization failed.'))
+        } else if (!background) {
+          store.setReady()
+        }
+        throw error
+      }
     }
 
     const task = (async () => {
@@ -550,9 +585,11 @@ export function useMorosWallet() {
       })
       .finally(() => {
         gameplaySessionPromise = null
+        gameplaySessionPromiseMode = null
       })
 
     gameplaySessionPromise = task
+    gameplaySessionPromiseMode = background ? 'background' : 'foreground'
     return task
   }, [accountRequiredMessage, ensureCanonicalPrivyWallet, signTypedData, store])
 
