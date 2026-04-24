@@ -21,6 +21,7 @@ import {
   feltToModulo,
 } from '../lib/poseidon'
 import { formatStrk, formatWagerInput, parseStrkInputToWei } from '../lib/format'
+import { resolveEffectiveMorosBalanceWei } from '../lib/game-balance'
 import { randomClientSeed, sameFelt } from '../lib/random'
 import { PlayingCard, type PlayingCardSuit } from '../components/PlayingCard'
 import { useAccountStore } from '../store/account'
@@ -476,7 +477,10 @@ export function BaccaratPage() {
         ? { live_players: undefined, state: tableState! }
         : await refreshTableState(playerAddress)
       const clientSeed = clientSeedDraft ?? randomClientSeed()
-      const bankrollBalanceWei = liveTable.state.player_balance ?? '0'
+      const bankrollBalanceWei = await resolveEffectiveMorosBalanceWei(
+        playerAddress,
+        liveTable.state.player_balance,
+      )
       const bankrollShortfall = BigInt(wagerWei) > BigInt(bankrollBalanceWei) ? BigInt(wagerWei) - BigInt(bankrollBalanceWei) : 0n
       if (bankrollShortfall > 0n) {
         throw new Error('Deposit STRK into your Moros balance before betting.')
@@ -515,7 +519,6 @@ export function BaccaratPage() {
       const message = error instanceof Error ? error.message : 'Failed to deal baccarat.'
       setTransientFairnessPhase(undefined)
       setStatusMessage(message)
-      pushToast({ message, tone: 'error', title: 'Baccarat error' })
     } finally {
       dealInFlightRef.current = false
       setIsDealing(false)
@@ -544,6 +547,7 @@ export function BaccaratPage() {
   ]
   const walletBusy =
     walletStatus === 'connecting' || walletStatus === 'preparing' || walletStatus === 'funding' || walletStatus === 'confirming'
+  const inlineWalletError = walletError && walletError !== statusMessage ? walletError : undefined
   const primaryActionLabel = isDealing
     ? 'Dealing...'
     : resolveMorosPrimaryActionLabel({
@@ -639,7 +643,7 @@ export function BaccaratPage() {
               </button>
             </div>
             {statusMessage ? <p className="stack-note">{statusMessage}</p> : null}
-            {walletError ? <p className="stack-note stack-note--error">{walletError}</p> : null}
+            {inlineWalletError ? <p className="stack-note stack-note--error">{inlineWalletError}</p> : null}
           </div>
         </aside>
 

@@ -16,6 +16,7 @@ import {
   feltToModulo,
 } from '../lib/poseidon'
 import { formatStrk, formatWagerInput, parseStrkInputToWei } from '../lib/format'
+import { resolveEffectiveMorosBalanceWei } from '../lib/game-balance'
 import { randomClientSeed, sameFelt } from '../lib/random'
 import { useMorosWallet } from '../hooks/useMorosWallet'
 import { useOriginalsCommitment } from '../hooks/useOriginalsCommitment'
@@ -746,7 +747,10 @@ export function RoulettePage() {
         ? { live_players: undefined, state: tableState! }
         : await refreshTableState(playerAddress)
       const clientSeed = clientSeedDraft ?? randomClientSeed()
-      const bankrollBalanceWei = liveTable.state.player_balance ?? '0'
+      const bankrollBalanceWei = await resolveEffectiveMorosBalanceWei(
+        playerAddress,
+        liveTable.state.player_balance,
+      )
       const bankrollShortfall =
         totalWagerWei > BigInt(bankrollBalanceWei) ? totalWagerWei - BigInt(bankrollBalanceWei) : 0n
       if (bankrollShortfall > 0n) {
@@ -792,7 +796,6 @@ export function RoulettePage() {
       const message = error instanceof Error ? error.message : 'Failed to spin roulette.'
       setTransientFairnessPhase(undefined)
       setStatusMessage(message)
-      pushToast({ message, tone: 'error', title: 'Roulette error' })
     } finally {
       spinInFlightRef.current = false
       setIsSpinning(false)
@@ -821,6 +824,7 @@ export function RoulettePage() {
   ]
   const walletBusy =
     walletStatus === 'connecting' || walletStatus === 'preparing' || walletStatus === 'funding' || walletStatus === 'confirming'
+  const inlineWalletError = walletError && walletError !== statusMessage ? walletError : undefined
   const primaryActionLabel = isSpinning
     ? 'Spinning...'
     : resolveMorosPrimaryActionLabel({
@@ -914,7 +918,7 @@ export function RoulettePage() {
               </button>
             </div>
             {statusMessage ? <p className="stack-note">{statusMessage}</p> : null}
-            {walletError ? <p className="stack-note stack-note--error">{walletError}</p> : null}
+            {inlineWalletError ? <p className="stack-note stack-note--error">{inlineWalletError}</p> : null}
           </div>
         </aside>
 

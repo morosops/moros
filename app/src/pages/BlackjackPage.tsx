@@ -13,6 +13,7 @@ import { GameUtilityBar } from '../components/GameUtilityBar'
 import { useMorosAuthRuntime } from '../components/MorosAuthProvider'
 import { deriveMorosAccountState, resolveMorosPrimaryActionLabel } from '../lib/account-state'
 import { morosConfig } from '../lib/config'
+import { resolveEffectiveMorosBalanceWei } from '../lib/game-balance'
 import { morosGameBySlug } from '../lib/game-config'
 import {
   clearStoredGameplaySession,
@@ -249,6 +250,7 @@ export function BlackjackPage() {
   const betLocked = Boolean(hand && hand.phase !== 'settled')
   const walletBusy =
     walletStatus === 'connecting' || walletStatus === 'preparing' || walletStatus === 'funding' || walletStatus === 'confirming'
+  const inlineWalletError = walletError && walletError !== statusMessage ? walletError : undefined
   const primaryActionLabel = createPending
     ? 'Opening hand...'
     : betLocked
@@ -387,7 +389,9 @@ export function BlackjackPage() {
       if (liveMaxWager > 0n && wagerValue > liveMaxWager) {
         throw new Error(`Moros currently allows wagers up to ${formatStrk(liveTable.state.table.max_wager)} on this table.`)
       }
-      const bankrollBalanceWei = BigInt(liveTable.state.player_balance ?? '0')
+      const bankrollBalanceWei = BigInt(
+        await resolveEffectiveMorosBalanceWei(playerAddress, liveTable.state.player_balance),
+      )
       const bankrollShortfall = wagerValue > bankrollBalanceWei ? wagerValue - bankrollBalanceWei : 0n
       if (bankrollShortfall > 0n) {
         setStatusMessage('Funding bankroll and opening your hand...')
@@ -685,7 +689,7 @@ export function BlackjackPage() {
             </button>
 
             {statusMessage ? <p className="stack-note">{statusMessage}</p> : null}
-            {walletError ? <p className="stack-note stack-note--error">{walletError}</p> : null}
+            {inlineWalletError ? <p className="stack-note stack-note--error">{inlineWalletError}</p> : null}
           </div>
         </aside>
 

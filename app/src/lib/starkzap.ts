@@ -10,6 +10,7 @@ import {
 import { RpcProvider, WalletAccount } from 'starknet'
 import starknetCore, { type StarknetWindowObject } from '@starknet-io/get-starknet-core'
 import { morosConfig } from './config'
+import { signMorosPrivyWalletHash } from './privy-bridge'
 import type {
   ConnectMorosPrivyWalletOptions,
   ConnectMorosWalletOptions,
@@ -315,10 +316,27 @@ export async function connectMorosPrivyWallet(
   const signer = new PrivySigner({
     walletId: privyWallet.wallet_id,
     publicKey: privyWallet.public_key,
-    rawSign: async (_walletId, hash) => options.signRawHash!({
-      address: privyWallet.wallet_address,
-      hash: (hash.startsWith('0x') ? hash : `0x${hash}`) as `0x${string}`,
-    }),
+    rawSign: async (walletId, hash) => {
+      const normalizedHash = (hash.startsWith('0x') ? hash : `0x${hash}`) as `0x${string}`
+      const latestSigningToken =
+        (await options.resolveSigningToken?.()) ?? options.signingToken ?? options.idToken
+      try {
+        return await signMorosPrivyWalletHash({
+          idToken: options.idToken,
+          signingToken: latestSigningToken,
+          walletId,
+          hash: normalizedHash,
+        })
+      } catch (error) {
+        if (!options.signRawHash) {
+          throw error
+        }
+        return options.signRawHash({
+          address: privyWallet.wallet_address,
+          hash: normalizedHash,
+        })
+      }
+    },
     buildBody: async ({ walletId, hash }) => {
       const signingToken = (await options.resolveSigningToken?.()) ?? options.signingToken ?? options.idToken
       return {

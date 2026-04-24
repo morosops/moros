@@ -24,6 +24,7 @@ import {
   formatWagerInput,
   parseStrkInput,
 } from '../lib/format'
+import { resolveEffectiveMorosBalanceWei } from '../lib/game-balance'
 import { randomClientSeed, sameFelt } from '../lib/random'
 import {
   type AutoAdjustMode,
@@ -169,7 +170,16 @@ function adjustPercentInput(current: string, delta: number, min = 0, max = 1000)
 }
 
 export function DicePage() {
-  const { address, balanceFormatted, connect, error: walletError, openDiceRound, pendingLabel, status: walletStatus } = useMorosWallet()
+  const {
+    address,
+    balanceFormatted,
+    connect,
+    ensureGameplaySession,
+    error: walletError,
+    openDiceRound,
+    pendingLabel,
+    status: walletStatus,
+  } = useMorosWallet()
   const accountUserId = useAccountStore((state) => state.userId)
   const accountWalletAddress = useAccountStore((state) => state.walletAddress)
   const accountState = deriveMorosAccountState({
@@ -268,6 +278,7 @@ export function DicePage() {
     }
   }, [multiplierBps, wager])
   const liveBalance = tableState?.player_balance ? formatStrk(tableState.player_balance) : balanceFormatted ?? '0 STRK'
+  const inlineWalletError = walletError && walletError !== statusMessage ? walletError : undefined
   const liveMaxBet = formatStrk(tableState?.table.max_wager ?? (100n * 10n ** 18n).toString())
   const walletBusy =
     walletStatus === 'connecting' || walletStatus === 'preparing' || walletStatus === 'funding' || walletStatus === 'confirming'
@@ -544,8 +555,24 @@ export function DicePage() {
 
     setProof(undefined)
     setActiveCommitment(undefined)
-    setTransientFairnessPhase('commit')
     const nextClientSeed = roundIndex === 0 && clientSeedDraft ? clientSeedDraft : randomClientSeed()
+    const bankrollShortfall = BigInt(wagerWei) > BigInt(bankrollBalanceWei) ? BigInt(wagerWei) - BigInt(bankrollBalanceWei) : 0n
+    if (bankrollShortfall > 0n) {
+      throw new Error('Deposit STRK into your Moros balance before betting.')
+    }
+    setTransientFairnessPhase(undefined)
+    setStatusMessage(
+      totalRounds === 1
+        ? 'Authorizing gameplay...'
+        : `Round ${roundIndex}/${totalRounds}: authorizing gameplay...`,
+    )
+    await ensureGameplaySession()
+    setTransientFairnessPhase('commit')
+    setStatusMessage(
+      totalRounds === 1
+        ? 'Preparing round commitment...'
+        : `Round ${roundIndex}/${totalRounds}: preparing commitment...`,
+    )
     const commitment = await takeCommitment()
     setActiveCommitment(commitment.commitment.commitment_id)
     setTransientFairnessPhase('open')
@@ -553,15 +580,10 @@ export function DicePage() {
     if (roundIndex === 0) {
       setClientSeedDraft(undefined)
     }
-    const bankrollShortfall = BigInt(wagerWei) > BigInt(bankrollBalanceWei) ? BigInt(wagerWei) - BigInt(bankrollBalanceWei) : 0n
     setStatusMessage(
       totalRounds === 1
-        ? bankrollShortfall > 0n
-          ? 'Deposit STRK into your Moros balance before betting.'
-          : 'Seed hash committed. Opening the round...'
-        : bankrollShortfall > 0n
-          ? 'Deposit STRK into your Moros balance before betting.'
-          : `Round ${roundIndex}/${totalRounds}: seed committed. Opening the round...`,
+        ? 'Seed hash committed. Opening the round...'
+        : `Round ${roundIndex}/${totalRounds}: seed committed. Opening the round...`,
     )
     await openDiceRound({
       tableId: diceTableId,
@@ -637,7 +659,11 @@ export function DicePage() {
         ? { live_players: undefined, state: tableState! }
         : await refreshTableState(playerAddress)
       const tableMax = liveTable.state.table.max_wager ? BigInt(liveTable.state.table.max_wager) : undefined
-      let playerBalance = liveTable.state.player_balance ? BigInt(liveTable.state.player_balance) : undefined
+      const effectiveBalanceWei = await resolveEffectiveMorosBalanceWei(
+        playerAddress,
+        liveTable.state.player_balance,
+      )
+      let playerBalance = BigInt(effectiveBalanceWei)
       const configuredRounds = Math.max(0, Number.parseInt(betCount, 10) || 0)
       const isInfiniteMode = playMode === 'auto' && configuredRounds === 0
       const roundsToRun = playMode === 'auto'
@@ -696,7 +722,7 @@ export function DicePage() {
           currentWagerWei.toString(),
           roundIndex,
           Number.isFinite(roundsToRun) ? roundsToRun : roundIndex,
-          playerBalance?.toString() ?? '0',
+          playerBalance.toString(),
         )
         if (isAutomatedMode && !autoRoundStarted) {
           setIsAutoRunning(true)
@@ -704,9 +730,7 @@ export function DicePage() {
           autoRoundStarted = true
         }
         const delta = BigInt(result.round.payout) - BigInt(result.round.wager)
-        if (playerBalance !== undefined) {
-          playerBalance = playerBalance - currentWagerWei + BigInt(result.round.payout)
-        }
+        playerBalance = playerBalance - currentWagerWei + BigInt(result.round.payout)
 
         if (delta >= 0n) {
           sessionProfit += delta
@@ -771,7 +795,6 @@ export function DicePage() {
       setTransientFairnessPhase(undefined)
       const message = error instanceof Error ? error.message : 'Failed to roll dice.'
       setStatusMessage(message)
-      pushToast({ message, tone: 'error', title: 'Dice error' })
     } finally {
       rollInFlightRef.current = false
       setIsRolling(false)
@@ -1140,7 +1163,7 @@ export function DicePage() {
           )}
 
           {statusMessage ? <p aria-live="polite" className="stack-note">{statusMessage}</p> : null}
-          {walletError ? <p className="stack-note stack-note--error" role="alert">{walletError}</p> : null}
+          {inlineWalletError ? <p className="stack-note stack-note--error" role="alert">{inlineWalletError}</p> : null}
         </aside>
 
         <div className="dice-stage-shell dice-stage-shell--structured">

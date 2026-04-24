@@ -123,7 +123,7 @@ function summarizeTransferStatus(transfer?: DepositTransfer | null) {
   if (!transfer) {
     return {
       badge: 'Awaiting deposit',
-      detail: 'Send funds to this fixed route address. Moros will detect the transfer, convert it to STRK, and credit your gambling balance after confirmation.',
+      detail: 'Send funds to this address.',
     }
   }
 
@@ -131,37 +131,37 @@ function summarizeTransferStatus(transfer?: DepositTransfer | null) {
     case 'DEPOSIT_DETECTED':
       return {
         badge: 'Deposit detected',
-        detail: `${transfer.confirmations}/${transfer.required_confirmations} confirmations observed on the source chain.`,
+        detail: `${transfer.confirmations}/${transfer.required_confirmations} confirmations.`,
       }
     case 'ORIGIN_CONFIRMED':
       return {
         badge: 'Confirmed on source chain',
-        detail: 'The deposit is confirmed and queued for STRK conversion.',
+        detail: 'Confirmed. Routing to STRK.',
       }
     case 'PROCESSING':
       return {
         badge: 'Routing to STRK',
-        detail: 'Bridge and swap execution is in progress.',
+        detail: 'Processing.',
       }
     case 'COMPLETED':
       return {
         badge: 'Credited',
-        detail: 'STRK has been credited to your Moros balance.',
+        detail: 'Credited to your Moros balance.',
       }
     case 'FLAGGED':
       return {
         badge: 'Held for review',
-        detail: 'This deposit is under review.',
+        detail: 'Under review.',
       }
     case 'RECOVERY_REQUIRED':
       return {
         badge: 'Recovery required',
-        detail: 'This deposit needs manual recovery before it can be credited.',
+        detail: 'Manual recovery required.',
       }
-      default:
+    default:
       return {
         badge: transfer.status.replace(/_/g, ' '),
-        detail: 'Deposit status updated.',
+        detail: 'Status updated.',
       }
   }
 }
@@ -180,16 +180,14 @@ function summarizeRouterState({
   if (latestRecovery && latestRecovery.status === 'open') {
     return {
       badge: 'Recovery required',
-      detail: latestRecovery.reason
-        ? `Manual recovery is open: ${latestRecovery.reason.replace(/_/g, ' ')}.`
-        : 'This deposit needs manual recovery before it can be credited.',
+      detail: 'Manual recovery required.',
     }
   }
 
   if (latestRiskFlag && latestRiskFlag.resolution_status === 'open') {
     return {
       badge: 'Held for review',
-      detail: latestRiskFlag.description || 'This deposit is under review.',
+      detail: latestRiskFlag.description || 'Under review.',
     }
   }
 
@@ -203,47 +201,47 @@ function summarizeRouterState({
       case 'queued':
         return {
           badge: 'Queued for routing',
-          detail: 'The deposit is confirmed and queued for STRK conversion.',
+          detail: 'Queued for STRK routing.',
         }
       case 'dispatching':
         return {
           badge: 'Routing started',
-          detail: 'Moros is starting the STRK conversion flow.',
+          detail: 'Starting route.',
         }
       case 'processing':
         if (stage === 'starknet_fee_topup_submitted') {
           return {
             badge: 'Preparing route',
-            detail: 'Moros is preparing the STRK conversion flow.',
+            detail: 'Preparing route.',
           }
         }
         if (stage === 'source_transfer_submitted') {
           return {
             badge: 'Processing deposit',
-            detail: 'Your deposit is being moved into the STRK conversion flow.',
+            detail: 'Moving deposit into route.',
           }
         }
         if (stage === 'bridge_submitted' || stage === 'solana_bridge_submitted') {
           return {
             badge: 'Bridge submitted',
-            detail: 'Your deposit is bridging to the STRK settlement path.',
+            detail: 'Bridging to STRK.',
           }
         }
         if (stage === 'swap_submitted') {
           return {
             badge: 'Swapping to STRK',
-            detail: 'Your deposit arrived and is being converted to STRK.',
+            detail: 'Swapping to STRK.',
           }
         }
         if (stage === 'bankroll_credit_submitted') {
           return {
             badge: 'Crediting balance',
-            detail: 'STRK is being added to your Moros balance.',
+            detail: 'Crediting Moros balance.',
           }
         }
         return {
           badge: 'Routing to STRK',
-          detail: 'Your deposit is being converted to STRK.',
+          detail: 'Routing to STRK.',
         }
       case 'retryable':
         return {
@@ -262,7 +260,7 @@ function summarizeRouterState({
       case 'completed':
         return {
           badge: 'Credited',
-          detail: 'STRK has been credited to your Moros balance.',
+          detail: 'Credited to your Moros balance.',
         }
       default:
         break
@@ -287,7 +285,7 @@ export function DepositRouterPanel({
   const [channelLoading, setChannelLoading] = useState(false)
   const [statusLoading, setStatusLoading] = useState(false)
   const [panelMessage, setPanelMessage] = useState<string>()
-  const [copyMessage, setCopyMessage] = useState<string>()
+  const [copiedTarget, setCopiedTarget] = useState<'address' | 'qr' | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string>()
   const [channelRetryKey, setChannelRetryKey] = useState(0)
 
@@ -404,40 +402,10 @@ export function DepositRouterPanel({
     setPanelMessage(undefined)
 
     const createChannel = async () => {
-      if (walletAddress) {
-        return createDepositChannel({
-          wallet_address: walletAddress,
-          asset_id: selectedAsset.id,
-          chain_key: selectedAsset.chain_key,
-        })
-      }
-
       let requestToken = idToken
 
       if (!requestToken && resolveIdToken) {
         requestToken = (await resolveIdToken()) ?? undefined
-      }
-
-      if (!requestToken) {
-        setChannelResponse(undefined)
-        setStatusResponse(undefined)
-        setQrDataUrl(undefined)
-        if (channelRetryKey >= MAX_AUTH_PREPARATION_RETRIES) {
-          const allowedOrigin = typeof window === 'undefined'
-            ? 'this origin'
-            : window.location.origin
-          setPanelMessage(
-            `Privy did not return a Moros auth token. Check that ${allowedOrigin} is allowed in Privy and that the session is still valid, then retry.`,
-          )
-          return
-        }
-        setPanelMessage('Preparing your Moros deposit routes.')
-        retryTimer = window.setTimeout(() => {
-          if (!cancelled) {
-            setChannelRetryKey((current) => current + 1)
-          }
-        }, AUTH_PREPARATION_RETRY_MS)
-        return
       }
 
       const requestBody = {
@@ -445,17 +413,52 @@ export function DepositRouterPanel({
         chain_key: selectedAsset.chain_key,
       }
 
-      try {
-        return await createAuthenticatedDepositChannel(requestToken, requestBody)
-      } catch (error) {
-        if (requestToken && resolveIdToken) {
-          const refreshedToken = (await resolveIdToken()) ?? undefined
-          if (refreshedToken && refreshedToken !== requestToken) {
-            return createAuthenticatedDepositChannel(refreshedToken, requestBody)
+      if (requestToken) {
+        try {
+          return await createAuthenticatedDepositChannel(requestToken, requestBody)
+        } catch (error) {
+          if (resolveIdToken) {
+            const refreshedToken = (await resolveIdToken()) ?? undefined
+            if (refreshedToken && refreshedToken !== requestToken) {
+              return createAuthenticatedDepositChannel(refreshedToken, requestBody)
+            }
           }
+          throw error
         }
-        throw error
       }
+
+      if (walletAddress) {
+        return createDepositChannel({
+          wallet_address: walletAddress,
+          ...requestBody,
+        })
+      }
+
+      setChannelResponse(undefined)
+      setStatusResponse(undefined)
+      setQrDataUrl(undefined)
+      if (channelRetryKey >= MAX_AUTH_PREPARATION_RETRIES) {
+        const allowedOrigin = typeof window === 'undefined'
+          ? 'this origin'
+          : window.location.origin
+        setPanelMessage(
+          `Privy did not return a Moros auth token. Check that ${allowedOrigin} is allowed in Privy and that the session is still valid, then retry.`,
+        )
+        return
+      }
+      setPanelMessage('Preparing your Moros deposit routes.')
+      retryTimer = window.setTimeout(() => {
+        if (!cancelled) {
+          setChannelRetryKey((current) => current + 1)
+        }
+      }, AUTH_PREPARATION_RETRY_MS)
+      return
+    }
+
+    if (walletAddress && resolveIdToken) {
+      setPanelMessage('Preparing your Moros deposit routes.')
+    } else {
+      setPanelMessage(undefined)
     }
 
     void createChannel()
@@ -579,12 +582,27 @@ export function DepositRouterPanel({
     }
   }, [channelResponse?.channel.qr_payload])
 
-  const copyValue = useCallback(async (value: string, successLabel: string) => {
+  useEffect(() => {
+    if (!copiedTarget) {
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setCopiedTarget(null)
+    }, 1400)
+
+    return () => {
+      window.clearTimeout(timeout)
+    }
+  }, [copiedTarget])
+
+  const copyValue = useCallback(async (value: string, target: 'address' | 'qr') => {
     try {
       await navigator.clipboard.writeText(value)
-      setCopyMessage(successLabel)
+      setCopiedTarget(target)
+      setPanelMessage(undefined)
     } catch {
-      setCopyMessage('Copy failed. Copy the value manually.')
+      setPanelMessage('Copy failed. Copy the value manually.')
     }
   }, [])
 
@@ -662,19 +680,22 @@ export function DepositRouterPanel({
             <div className="deposit-router__address-card">
               <span className="wallet-funds__section-label">Funding route address</span>
               <div className="deposit-router__address-row">
-                <input
-                  className="text-input"
-                  readOnly
-                  type="text"
-                  value={channelResponse.channel.deposit_address}
-                />
-                <button
-                  className="button button--ghost"
-                  onClick={() => void copyValue(channelResponse.channel.deposit_address, 'Funding route address copied.')}
-                  type="button"
-                >
-                  Copy
-                </button>
+                <div className="deposit-router__address-input">
+                  <input
+                    className="text-input"
+                    readOnly
+                    type="text"
+                    value={channelResponse.channel.deposit_address}
+                  />
+                  <button
+                    aria-label="Copy funding route address"
+                    className="deposit-router__copy-chip"
+                    onClick={() => void copyValue(channelResponse.channel.deposit_address, 'address')}
+                    type="button"
+                  >
+                    {copiedTarget === 'address' ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -688,12 +709,8 @@ export function DepositRouterPanel({
               </div>
               <p className="deposit-router__status-copy">{transferSummary.detail}</p>
               <div className="wallet-funds__inline-meta">
-                <span>This address stays fixed for this chain.</span>
-                <span>Supported tokens on the same chain reuse this address. Moros detects the asset from the incoming transfer.</span>
-                <span>This is a Moros routing endpoint for the selected chain, not the final Starknet vault destination.</span>
-                <span>Confirmed deposits are routed into STRK automatically and then credited to your Moros gambling balance.</span>
+                <span>Fixed route for this chain.</span>
                 {channelLoading ? <span>Refreshing deposit channel…</span> : null}
-                {copyMessage ? <span>{copyMessage}</span> : null}
                 {panelMessage ? <span>{panelMessage}</span> : null}
               </div>
             </div>
@@ -706,10 +723,10 @@ export function DepositRouterPanel({
             <div className="deposit-router__qr-actions">
               <button
                 className="button button--ghost"
-                onClick={() => void copyValue(channelResponse.channel.qr_payload, 'Deposit QR payload copied.')}
+                onClick={() => void copyValue(channelResponse.channel.qr_payload, 'qr')}
                 type="button"
               >
-                Copy QR payload
+                {copiedTarget === 'qr' ? 'Copied!' : 'Copy QR payload'}
               </button>
               <span>Send only {selectedAsset.asset_symbol} on {formatChainLabel(selectedAsset)}.</span>
             </div>

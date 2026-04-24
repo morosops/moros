@@ -8081,10 +8081,51 @@ body {
 }
 
 .deposit-router__address-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  display: block;
+}
+
+.deposit-router__address-input {
+  position: relative;
+}
+
+.deposit-router__address-input .text-input {
+  padding-right: 88px;
+}
+
+.deposit-router__copy-chip {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 5px;
+  background: rgba(24, 27, 35, 0.96);
+  color: #c9ccd6;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out,
+    transform 140ms ease-out;
+}
+
+.deposit-router__copy-chip:hover {
+  border-color: rgba(201, 204, 214, 0.14);
+  background: rgba(29, 33, 43, 0.98);
+  color: #f1f4fa;
+}
+
+.deposit-router__copy-chip:active {
+  transform: translateY(-50%) scale(0.98);
 }
 
 .deposit-router__status-head,
@@ -8199,8 +8240,7 @@ body {
 
 @media (max-width: 860px) {
   .deposit-router__selectors,
-  .deposit-router__layout,
-  .deposit-router__address-row {
+  .deposit-router__layout {
     grid-template-columns: 1fr;
   }
 

@@ -206,7 +206,7 @@ describe('DepositRouterPanel', () => {
     expect(await screen.findByDisplayValue('0xdeposit')).toBeTruthy()
     expect(await screen.findByAltText('Deposit QR code')).toBeTruthy()
     expect(screen.getByText('Deposit detected')).toBeTruthy()
-    expect(screen.getByText(/4\/12 confirmations observed/i)).toBeTruthy()
+    expect(screen.getByText(/4\/12 confirmations\./i)).toBeTruthy()
     expect(screen.getByText(/Recent deposits/i)).toBeTruthy()
     expect(screen.getByText(/Send only USDC on Ethereum Mainnet/i)).toBeTruthy()
   })

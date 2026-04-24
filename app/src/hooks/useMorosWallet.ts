@@ -312,13 +312,19 @@ export function useMorosWallet() {
   const ensureCanonicalPrivyWallet = useCallback(async () => {
     const currentState = useWalletStore.getState()
     const canonicalWalletAddress = useAccountStore.getState().walletAddress
+    const canUsePrivyRuntime =
+      auth.authenticated && currentState.strategy !== 'external'
+    const needsPrivyReconnect = Boolean(
+      canUsePrivyRuntime &&
+      canonicalWalletAddress &&
+      (
+        !currentState.wallet ||
+        !currentState.address ||
+        currentState.address.toLowerCase() !== canonicalWalletAddress.toLowerCase()
+      ),
+    )
 
-    if (
-      currentState.strategy !== 'privy' ||
-      !currentState.address ||
-      !canonicalWalletAddress ||
-      currentState.address.toLowerCase() === canonicalWalletAddress.toLowerCase()
-    ) {
+    if (!needsPrivyReconnect) {
       return currentState
     }
 
@@ -329,7 +335,7 @@ export function useMorosWallet() {
 
     await connectPrivy(identityToken)
     return useWalletStore.getState()
-  }, [connectPrivy, resolvePrivyIdentityToken])
+  }, [auth.authenticated, connectPrivy, resolvePrivyIdentityToken])
 
   const warmConnect = useCallback(() => {
     void loadStarkzap()
@@ -427,9 +433,10 @@ export function useMorosWallet() {
   }, [accountRequiredMessage, reconnectForInteraction, store])
 
   const ensureGameplaySessionInternal = useCallback(async (
-    options?: { background?: boolean },
+    options?: { background?: boolean; suppressStoreError?: boolean },
   ) => {
     const background = Boolean(options?.background)
+    const suppressStoreError = Boolean(options?.suppressStoreError)
     let currentState = await ensureCanonicalPrivyWallet()
     const connectedWallet = currentState.wallet
     const connectedAddress = currentState.address
@@ -534,8 +541,10 @@ export function useMorosWallet() {
       return session.session_token
     })()
       .catch((error) => {
-        if (!background) {
+        if (!background && !suppressStoreError) {
           store.setError(normalizeWalletError(error, 'Gameplay authorization failed.'))
+        } else if (!background) {
+          store.setReady()
         }
         throw error
       })
@@ -548,7 +557,7 @@ export function useMorosWallet() {
   }, [accountRequiredMessage, ensureCanonicalPrivyWallet, signTypedData, store])
 
   const ensureGameplaySession = useCallback(async () => {
-    return ensureGameplaySessionInternal()
+    return ensureGameplaySessionInternal({ suppressStoreError: true })
   }, [ensureGameplaySessionInternal])
 
   const prewarmGameplaySession = useCallback(async () => {
@@ -643,7 +652,7 @@ export function useMorosWallet() {
 
       throw new Error('Gameplay request failed.')
     } catch (error) {
-      store.setError(normalizeWalletError(error, 'Gameplay request failed.'))
+      store.setReady()
       throw error
     } finally {
       if (succeeded) {
@@ -702,9 +711,6 @@ export function useMorosWallet() {
         if (!activeAddress) {
           throw new Error(accountRequiredMessage)
         }
-        if (BigInt(payload.wagerWei) > BigInt(payload.bankrollBalanceWei ?? '0')) {
-          throw new Error('Deposit STRK into your Moros balance before betting.')
-        }
         return openDiceRoundRelayed(sessionToken, {
           table_id: payload.tableId,
           player: activeAddress,
@@ -726,9 +732,6 @@ export function useMorosWallet() {
         const activeAddress = useWalletStore.getState().address ?? store.address
         if (!activeAddress) {
           throw new Error(accountRequiredMessage)
-        }
-        if (BigInt(payload.totalWagerWei) > BigInt(payload.bankrollBalanceWei ?? '0')) {
-          throw new Error('Deposit STRK into your Moros balance before betting.')
         }
         return openRouletteSpinRelayed(sessionToken, {
           table_id: payload.tableId,
@@ -754,9 +757,6 @@ export function useMorosWallet() {
         const activeAddress = useWalletStore.getState().address ?? store.address
         if (!activeAddress) {
           throw new Error(accountRequiredMessage)
-        }
-        if (BigInt(payload.wagerWei) > BigInt(payload.bankrollBalanceWei ?? '0')) {
-          throw new Error('Deposit STRK into your Moros balance before betting.')
         }
         return openBaccaratRoundRelayed(sessionToken, {
           table_id: payload.tableId,
